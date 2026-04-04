@@ -1,0 +1,18 @@
+image:
+  repository: argo-history
+  tag: dev
+  pullPolicy: IfNotPresent
+
+service:
+  nodePort: 32080
+
+history:
+  persistence:
+    enabled: true
+    mountPath: /var/lib/argo-history
+    storageClassName: argo-history-hostpath
+    size: 2Gi
+    createPv: true
+    hostPath:
+      path: /var/lib/argo-history
+      type: DirectoryOrCreate

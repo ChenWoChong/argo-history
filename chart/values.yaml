@@ -1,0 +1,45 @@
+image:
+  repository: argo-history
+  tag: dev
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+
+service:
+  nodePort: 32080
+
+history:
+  rootDir: /var/lib/argo-history
+  persistence:
+    enabled: true
+    existingClaim: ""
+    mountPath: /var/lib/argo-history
+    storageClassName: argo-history-hostpath
+    accessModes:
+      - ReadWriteOnce
+    size: 2Gi
+    createPv: true
+    reclaimPolicy: Retain
+    hostPath:
+      path: /var/lib/argo-history
+      type: DirectoryOrCreate
+
+webhook:
+  servicePort: 443
+  failurePolicy: Ignore
+  timeoutSeconds: 10
+  matchPolicy: Equivalent
+  sideEffects: NoneOnDryRun
+
+certManager:
+  enabled: true
+  issuer:
+    create: true
+    kind: Issuer
+    name: ""
+  certificate:
+    secretName: ""
+    duration: 2160h
+    renewBefore: 360h

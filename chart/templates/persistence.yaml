@@ -1,0 +1,37 @@
+{{- if and .Values.history.persistence.enabled .Values.history.persistence.createPv }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ include "argo-history.historyVolumeName" . }}
+  labels:
+    {{- include "argo-history.labels" . | nindent 4 }}
+spec:
+  capacity:
+    storage: {{ .Values.history.persistence.size }}
+  accessModes:
+{{ toYaml .Values.history.persistence.accessModes | nindent 4 }}
+  persistentVolumeReclaimPolicy: {{ .Values.history.persistence.reclaimPolicy }}
+  storageClassName: {{ .Values.history.persistence.storageClassName }}
+  hostPath:
+    path: {{ .Values.history.persistence.hostPath.path }}
+    type: {{ .Values.history.persistence.hostPath.type }}
+---
+{{- end }}
+{{- if and .Values.history.persistence.enabled (not .Values.history.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "argo-history.historyVolumeName" . }}
+  labels:
+    {{- include "argo-history.labels" . | nindent 4 }}
+spec:
+  accessModes:
+{{ toYaml .Values.history.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.history.persistence.size }}
+  storageClassName: {{ .Values.history.persistence.storageClassName }}
+  {{- if .Values.history.persistence.createPv }}
+  volumeName: {{ include "argo-history.historyVolumeName" . }}
+  {{- end }}
+{{- end }}

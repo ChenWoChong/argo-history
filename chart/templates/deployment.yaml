@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "argo-history.fullname" . }}
+  labels:
+    {{- include "argo-history.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "argo-history.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "argo-history.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      initContainers:
+        - name: init-history
+          image: busybox:1.36.1
+          command:
+            - /bin/sh
+            - -c
+            - mkdir -p /history && chown -R 65532:65532 /history
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: history
+              mountPath: /history
+      containers:
+        - name: server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config
+            - /config/config.yaml
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: webhook
+              containerPort: 9443
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+            - name: history
+              mountPath: {{ .Values.history.persistence.mountPath }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "argo-history.configMapName" . }}
+        - name: certs
+          secret:
+            secretName: {{ include "argo-history.webhookSecretName" . }}
+        - name: history
+          persistentVolumeClaim:
+            claimName: {{ default (include "argo-history.historyVolumeName" .) .Values.history.persistence.existingClaim }}
+      serviceAccountName: {{ include "argo-history.serviceAccountName" . }}

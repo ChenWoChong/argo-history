@@ -1,0 +1,6 @@
+apiVersion: v2
+name: argo-history
+description: Backup and view Argo CD Application/ApplicationSet history
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

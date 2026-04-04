@@ -1,0 +1,47 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "argo-history.fullname" . }}
+  labels:
+    {{- include "argo-history.labels" . | nindent 4 }}
+  {{- if .Values.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "argo-history.certificateName" . }}
+  {{- end }}
+webhooks:
+  - name: {{ include "argo-history.fullname" . }}.app.webhook
+    admissionReviewVersions:
+      - v1
+    sideEffects: {{ .Values.webhook.sideEffects }}
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    matchPolicy: {{ .Values.webhook.matchPolicy }}
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    clientConfig:
+      service:
+        name: {{ include "argo-history.webhookServiceName" . }}
+        namespace: {{ .Release.Namespace }}
+        path: /webhook/application
+        port: {{ .Values.webhook.servicePort }}
+    rules:
+      - operations: [CREATE, UPDATE, DELETE]
+        apiGroups: [argoproj.io]
+        apiVersions: [v1alpha1]
+        resources: [applications]
+  - name: {{ include "argo-history.fullname" . }}.appset.webhook
+    admissionReviewVersions:
+      - v1
+    sideEffects: {{ .Values.webhook.sideEffects }}
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    matchPolicy: {{ .Values.webhook.matchPolicy }}
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    clientConfig:
+      service:
+        name: {{ include "argo-history.webhookServiceName" . }}
+        namespace: {{ .Release.Namespace }}
+        path: /webhook/applicationset
+        port: {{ .Values.webhook.servicePort }}
+    rules:
+      - operations: [CREATE, UPDATE, DELETE]
+        apiGroups: [argoproj.io]
+        apiVersions: [v1alpha1]
+        resources: [applicationsets]
