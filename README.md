@@ -2,6 +2,10 @@
 
 独立的 Argo CD `Application` / `ApplicationSet` 历史备份与查看项目。
 
+## 文档
+
+- [整体架构与 API 文档](/Users/wochong/Documents/code/truth-ai/infras/argo-history/docs/architecture.md)
+
 ## 功能
 
 - Validating admission webhook 拦截 `CREATE`、`UPDATE`、`DELETE`
