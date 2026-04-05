@@ -34,6 +34,8 @@
 
   async function navigate(url, options = {}) {
     const nextUrl = typeof url === "string" ? url : url.toString();
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
     document.body.classList.add("is-loading");
     try {
       const response = await fetch(nextUrl, {
@@ -68,7 +70,9 @@
       } else {
         window.history.pushState({}, "", nextUrl);
       }
-      window.scrollTo({ top: 0, behavior: "instant" });
+      window.requestAnimationFrame(() => {
+        window.scrollTo(scrollX, scrollY);
+      });
     } catch (_error) {
       window.location.href = nextUrl;
     } finally {
