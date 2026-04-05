@@ -71,6 +71,13 @@
         window.history.pushState({}, "", nextUrl);
       }
       window.requestAnimationFrame(() => {
+        if (options.scrollTargetSelector) {
+          const target = document.querySelector(options.scrollTargetSelector);
+          if (target) {
+            target.scrollIntoView({ block: "nearest", inline: "nearest" });
+            return;
+          }
+        }
         window.scrollTo(scrollX, scrollY);
       });
     } catch (_error) {
@@ -101,7 +108,11 @@
       return;
     }
     event.preventDefault();
-    navigate(anchor.href);
+    const pagination = anchor.closest("[data-pagination-scope]");
+    const scrollTargetSelector = pagination
+      ? `[data-pagination-scope="${pagination.getAttribute("data-pagination-scope")}"]`
+      : null;
+    navigate(anchor.href, { scrollTargetSelector });
   });
 
   document.addEventListener("submit", (event) => {
@@ -119,7 +130,11 @@
       }
     }
     url.search = query.toString();
-    navigate(url.toString());
+    const pagination = form.closest("[data-pagination-scope]");
+    const scrollTargetSelector = pagination
+      ? `[data-pagination-scope="${pagination.getAttribute("data-pagination-scope")}"]`
+      : null;
+    navigate(url.toString(), { scrollTargetSelector });
   });
 
   window.addEventListener("popstate", () => {

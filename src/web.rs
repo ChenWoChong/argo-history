@@ -852,36 +852,67 @@ where
     if current > 1 {
         links.push(PaginationLink {
             label: "首页".to_string(),
-            href: href_for(1),
+            href: Some(href_for(1)),
             is_active: false,
+            is_gap: false,
         });
     }
     if current > 1 {
         links.push(PaginationLink {
             label: "上一页".to_string(),
-            href: href_for(current - 1),
+            href: Some(href_for(current - 1)),
             is_active: false,
+            is_gap: false,
         });
     }
 
-    for page in 1..=total {
+    let start = usize::max(1, current.saturating_sub(1));
+    let end = usize::min(total, current + 1);
+    let mut page_numbers = Vec::new();
+    page_numbers.push(1);
+    for page in start..=end {
+        if !page_numbers.contains(&page) {
+            page_numbers.push(page);
+        }
+    }
+    if !page_numbers.contains(&total) {
+        page_numbers.push(total);
+    }
+    page_numbers.sort_unstable();
+
+    let mut previous_page = None;
+    for page in page_numbers {
+        if let Some(previous) = previous_page
+            && page > previous + 1
+        {
+            links.push(PaginationLink {
+                label: "…".to_string(),
+                href: None,
+                is_active: false,
+                is_gap: true,
+            });
+        }
         links.push(PaginationLink {
             label: page.to_string(),
-            href: href_for(page),
+            href: Some(href_for(page)),
             is_active: page == current,
+            is_gap: false,
         });
+        previous_page = Some(page);
     }
 
     if current < total {
         links.push(PaginationLink {
             label: "下一页".to_string(),
-            href: href_for(current + 1),
+            href: Some(href_for(current + 1)),
             is_active: false,
+            is_gap: false,
         });
         links.push(PaginationLink {
             label: "末页".to_string(),
-            href: href_for(total),
+            href: Some(href_for(total)),
             is_active: false,
+            is_gap: false,
         });
     }
 

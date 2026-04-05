@@ -57,10 +57,19 @@
           </div>
           {% match object_pagination %}
           {% when Some with (pagination) %}
-          <nav class="pagination" aria-label="对象列表分页">
+          <nav class="pagination" aria-label="对象列表分页" data-pagination-scope="objects">
             <span class="page-stats">共 {{ pagination.total_pages }} 页 / 共 {{ pagination.total_items }} 条</span>
             {% for link in pagination.links %}
-            <a class="page-link {% if link.is_active %}active{% endif %}" href="{{ link.href }}">{{ link.label }}</a>
+            {% if link.is_gap %}
+            <span class="page-gap">{{ link.label }}</span>
+            {% else %}
+            {% match link.href %}
+            {% when Some with (href) %}
+            <a class="page-link {% if link.is_active %}active{% endif %}" href="{{ href }}">{{ link.label }}</a>
+            {% when None %}
+            <span class="page-gap">{{ link.label }}</span>
+            {% endmatch %}
+            {% endif %}
             {% endfor %}
             <form class="page-jump" method="get" action="{{ pagination.form_action }}" data-spa-search>
               <input type="hidden" name="q" value="{{ search_query }}" />
@@ -97,10 +106,19 @@
               </div>
               {% match versions_pagination %}
               {% when Some with (pagination) %}
-              <nav class="pagination pagination-bottom" aria-label="历史版本分页">
+              <nav class="pagination pagination-bottom" aria-label="历史版本分页" data-pagination-scope="versions">
                 <span class="page-stats">共 {{ pagination.total_pages }} 页 / 共 {{ pagination.total_items }} 条</span>
                 {% for link in pagination.links %}
-                <a class="page-link {% if link.is_active %}active{% endif %}" href="{{ link.href }}">{{ link.label }}</a>
+                {% if link.is_gap %}
+                <span class="page-gap">{{ link.label }}</span>
+                {% else %}
+                {% match link.href %}
+                {% when Some with (href) %}
+                <a class="page-link {% if link.is_active %}active{% endif %}" href="{{ href }}">{{ link.label }}</a>
+                {% when None %}
+                <span class="page-gap">{{ link.label }}</span>
+                {% endmatch %}
+                {% endif %}
                 {% endfor %}
                 <form class="page-jump" method="get" action="{{ pagination.form_action }}" data-spa-search>
                   <input type="hidden" name="q" value="{{ search_query }}" />

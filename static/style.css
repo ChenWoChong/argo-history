@@ -283,6 +283,14 @@ a {
   border-color: transparent;
 }
 
+.page-gap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  color: #637982;
+}
+
 .page-jump {
   display: inline-flex;
   align-items: center;

@@ -22,8 +22,9 @@ pub struct SidebarGroup {
 #[derive(Debug, Clone)]
 pub struct PaginationLink {
     pub label: String,
-    pub href: String,
+    pub href: Option<String>,
     pub is_active: bool,
+    pub is_gap: bool,
 }
 
 #[derive(Debug, Clone)]
