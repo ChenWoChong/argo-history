@@ -18,10 +18,12 @@ use crate::{
     model::{ObjectHistory, Operation, ResourceKind},
     storage::HistoryStore,
     templates::{
-        CodeLine, CodeToken, HighlightedBlock, HistoryTemplate, SidebarGroup, SidebarObject,
-        VersionLink,
+        CodeLine, CodeToken, HighlightedBlock, HistoryTemplate, Pagination, PaginationLink,
+        SidebarGroup, SidebarObject, VersionLink,
     },
 };
+
+const PAGE_SIZE: usize = 8;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -32,6 +34,8 @@ pub struct AppState {
 pub struct PageQuery {
     pub q: Option<String>,
     pub version: Option<String>,
+    pub objects_page: Option<usize>,
+    pub versions_page: Option<usize>,
 }
 
 pub fn http_router(state: AppState) -> Router {
@@ -138,7 +142,11 @@ async fn render_history_page(
         .as_ref()
         .map(|(namespace, name)| (crate::model::namespace_key(namespace), name.clone()));
 
-    let sidebar_objects = objects
+    let object_page = resolve_object_page(&objects, &selected_key, query.objects_page);
+    let object_page_count = total_pages(objects.len(), PAGE_SIZE);
+    let object_slice = paginate_slice(&objects, object_page, PAGE_SIZE);
+
+    let sidebar_objects = object_slice
         .iter()
         .map(|item| SidebarObject {
             name: item.name.clone(),
@@ -149,7 +157,15 @@ async fn render_history_page(
                 .clone()
                 .unwrap_or_else(|| "-".to_string()),
             version_count: item.version_count,
-            href: object_href(kind, &item.namespace_key, &item.name, &search_query, None),
+            href: object_href(
+                kind,
+                &item.namespace_key,
+                &item.name,
+                &search_query,
+                object_page,
+                None,
+                None,
+            ),
             is_selected: selected_key
                 .as_ref()
                 .map(|(namespace, name)| namespace == &item.namespace_key && name == &item.name)
@@ -157,12 +173,21 @@ async fn render_history_page(
         })
         .collect::<Vec<_>>();
     let object_groups = build_sidebar_groups(kind, sidebar_objects);
+    let object_pagination = build_pagination(
+        object_page,
+        object_page_count,
+        objects.len(),
+        "objects_page",
+        format!("/{}", kind.route()),
+        |page| collection_href(kind, &search_query, page),
+    );
 
     let mut has_selection = false;
     let mut selected_name = String::new();
     let mut selected_namespace = String::new();
     let mut selected_source_label = String::new();
     let mut versions = Vec::new();
+    let mut versions_pagination = None;
     let mut preview_block = HighlightedBlock {
         title: "YAML 预览".to_string(),
         lines: vec![plain_line("请选择一个对象查看内容。")],
@@ -180,10 +205,16 @@ async fn render_history_page(
         selected_namespace = history.namespace.clone();
         selected_source_label = history.source_label.clone();
 
+        let versions_page =
+            resolve_versions_page(&history, query.version.as_deref(), query.versions_page);
         let active_file = query
             .version
             .filter(|value| history.versions.iter().any(|item| item.file_name == *value))
-            .unwrap_or_else(|| history.versions[0].file_name.clone());
+            .unwrap_or_else(|| {
+                paginate_slice(&history.versions, versions_page, PAGE_SIZE)[0]
+                    .file_name
+                    .clone()
+            });
 
         let preview_content = state
             .store
@@ -213,17 +244,19 @@ async fn render_history_page(
             });
         }
 
-        versions = history
-            .versions
-            .into_iter()
+        let version_page_count = total_pages(history.versions.len(), PAGE_SIZE);
+        versions = paginate_slice(&history.versions, versions_page, PAGE_SIZE)
+            .iter()
             .map(|item| VersionLink {
                 title: format!("{} / {}", item.operation, item.file_name),
-                timestamp: item.timestamp,
+                timestamp: item.timestamp.clone(),
                 href: object_href(
                     kind,
                     &crate::model::namespace_key(&namespace),
                     &name,
                     &search_query,
+                    object_page,
+                    Some(versions_page),
                     Some(&item.file_name),
                 ),
                 download_href: format!(
@@ -236,22 +269,48 @@ async fn render_history_page(
                 is_active: item.file_name == active_file,
             })
             .collect();
+        versions_pagination = build_pagination(
+            versions_page,
+            version_page_count,
+            history.versions.len(),
+            "versions_page",
+            format!(
+                "/{}/{}/{}",
+                kind.route(),
+                crate::model::namespace_key(&namespace),
+                name
+            ),
+            |page| {
+                object_href(
+                    kind,
+                    &crate::model::namespace_key(&namespace),
+                    &name,
+                    &search_query,
+                    object_page,
+                    Some(page),
+                    Some(&active_file),
+                )
+            },
+        );
     }
 
     let template = HistoryTemplate {
         active_route: kind.route(),
-        apps_href: collection_href(ResourceKind::App, &search_query),
-        appsets_href: collection_href(ResourceKind::AppSet, &search_query),
+        apps_href: collection_href(ResourceKind::App, &search_query, object_page),
+        appsets_href: collection_href(ResourceKind::AppSet, &search_query, object_page),
         search_action: format!("/{}", kind.route()),
         app_count,
         appset_count,
         object_groups,
+        object_pagination,
+        current_objects_page: object_page,
         search_query,
         has_selection,
         selected_name,
         selected_namespace,
         selected_source_label,
         versions,
+        versions_pagination,
         preview_block,
         diff_block,
     };
@@ -665,11 +724,19 @@ fn classify_scalar(word: &str) -> &'static str {
     "tok-plain"
 }
 
-fn collection_href(kind: ResourceKind, search_query: &str) -> String {
-    if search_query.is_empty() {
-        return format!("/{}", kind.route());
+fn collection_href(kind: ResourceKind, search_query: &str, object_page: usize) -> String {
+    let mut query = Vec::new();
+    if !search_query.is_empty() {
+        query.push(format!("q={}", encode(search_query)));
     }
-    format!("/{0}?q={1}", kind.route(), encode(search_query))
+    if object_page > 1 {
+        query.push(format!("objects_page={object_page}"));
+    }
+    if query.is_empty() {
+        format!("/{}", kind.route())
+    } else {
+        format!("/{0}?{1}", kind.route(), query.join("&"))
+    }
 }
 
 fn object_href(
@@ -677,11 +744,19 @@ fn object_href(
     namespace: &str,
     name: &str,
     search_query: &str,
+    object_page: usize,
+    versions_page: Option<usize>,
     version: Option<&str>,
 ) -> String {
     let mut query = Vec::new();
     if !search_query.is_empty() {
         query.push(format!("q={}", encode(search_query)));
+    }
+    if object_page > 1 {
+        query.push(format!("objects_page={object_page}"));
+    }
+    if let Some(versions_page) = versions_page.filter(|page| *page > 1) {
+        query.push(format!("versions_page={versions_page}"));
     }
     if let Some(version) = version {
         query.push(format!("version={}", encode(version)));
@@ -698,6 +773,125 @@ fn object_href(
             query.join("&")
         )
     }
+}
+
+fn total_pages(total: usize, page_size: usize) -> usize {
+    usize::max(1, total.div_ceil(page_size))
+}
+
+fn current_page(requested: Option<usize>, total_pages: usize) -> usize {
+    requested.unwrap_or(1).clamp(1, total_pages)
+}
+
+fn paginate_slice<T>(items: &[T], page: usize, page_size: usize) -> &[T] {
+    if items.is_empty() {
+        return items;
+    }
+    let start = (page - 1) * page_size;
+    let end = usize::min(start + page_size, items.len());
+    &items[start..end]
+}
+
+fn resolve_object_page(
+    objects: &[crate::model::ObjectSummary],
+    selected_key: &Option<(String, String)>,
+    requested: Option<usize>,
+) -> usize {
+    let total = total_pages(objects.len(), PAGE_SIZE);
+    if let Some(requested) = requested {
+        return current_page(Some(requested), total);
+    }
+    if let Some((namespace, name)) = selected_key {
+        if let Some(index) = objects
+            .iter()
+            .position(|item| item.namespace_key == *namespace && item.name == *name)
+        {
+            return index / PAGE_SIZE + 1;
+        }
+    }
+    1
+}
+
+fn resolve_versions_page(
+    history: &ObjectHistory,
+    selected_version: Option<&str>,
+    requested: Option<usize>,
+) -> usize {
+    let total = total_pages(history.versions.len(), PAGE_SIZE);
+    if let Some(requested) = requested {
+        return current_page(Some(requested), total);
+    }
+    if let Some(selected_version) = selected_version {
+        if let Some(index) = history
+            .versions
+            .iter()
+            .position(|item| item.file_name == selected_version)
+        {
+            return index / PAGE_SIZE + 1;
+        }
+    }
+    1
+}
+
+fn build_pagination<F>(
+    current: usize,
+    total: usize,
+    total_items: usize,
+    input_name: &str,
+    form_action: String,
+    href_for: F,
+) -> Option<Pagination>
+where
+    F: Fn(usize) -> String,
+{
+    if total <= 1 {
+        return None;
+    }
+
+    let mut links = Vec::new();
+    if current > 1 {
+        links.push(PaginationLink {
+            label: "首页".to_string(),
+            href: href_for(1),
+            is_active: false,
+        });
+    }
+    if current > 1 {
+        links.push(PaginationLink {
+            label: "上一页".to_string(),
+            href: href_for(current - 1),
+            is_active: false,
+        });
+    }
+
+    for page in 1..=total {
+        links.push(PaginationLink {
+            label: page.to_string(),
+            href: href_for(page),
+            is_active: page == current,
+        });
+    }
+
+    if current < total {
+        links.push(PaginationLink {
+            label: "下一页".to_string(),
+            href: href_for(current + 1),
+            is_active: false,
+        });
+        links.push(PaginationLink {
+            label: "末页".to_string(),
+            href: href_for(total),
+            is_active: false,
+        });
+    }
+
+    Some(Pagination {
+        links,
+        input_name: input_name.to_string(),
+        form_action,
+        total_items,
+        total_pages: total,
+    })
 }
 
 fn resource_from_path(path: &str) -> Result<ResourceKind, AppError> {

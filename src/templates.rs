@@ -20,6 +20,22 @@ pub struct SidebarGroup {
 }
 
 #[derive(Debug, Clone)]
+pub struct PaginationLink {
+    pub label: String,
+    pub href: String,
+    pub is_active: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct Pagination {
+    pub links: Vec<PaginationLink>,
+    pub input_name: String,
+    pub form_action: String,
+    pub total_items: usize,
+    pub total_pages: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct VersionLink {
     pub title: String,
     pub timestamp: String,
@@ -57,12 +73,15 @@ pub struct HistoryTemplate {
     pub app_count: usize,
     pub appset_count: usize,
     pub object_groups: Vec<SidebarGroup>,
+    pub object_pagination: Option<Pagination>,
+    pub current_objects_page: usize,
     pub search_query: String,
     pub has_selection: bool,
     pub selected_name: String,
     pub selected_namespace: String,
     pub selected_source_label: String,
     pub versions: Vec<VersionLink>,
+    pub versions_pagination: Option<Pagination>,
     pub preview_block: HighlightedBlock,
     pub diff_block: Option<HighlightedBlock>,
 }

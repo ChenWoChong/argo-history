@@ -233,6 +233,12 @@ a {
   align-items: start;
 }
 
+.detail-main {
+  display: grid;
+  gap: 14px;
+  align-self: start;
+}
+
 .stack {
   display: grid;
   gap: 18px;
@@ -242,6 +248,66 @@ a {
 .versions {
   display: grid;
   gap: 10px;
+}
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  align-items: center;
+}
+
+.page-stats {
+  margin-right: 10px;
+  color: #637982;
+  font-size: 13px;
+}
+
+.page-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(19, 35, 41, 0.12);
+  background: rgba(255, 255, 255, 0.8);
+  color: #35535d;
+  font-size: 13px;
+}
+
+.page-link.active {
+  background: #183f39;
+  color: #fff8ef;
+  border-color: transparent;
+}
+
+.page-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.page-jump input {
+  width: 88px;
+  border: 1px solid rgba(19, 35, 41, 0.12);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font: inherit;
+  background: rgba(255, 255, 255, 0.8);
+  color: #35535d;
+}
+
+.page-jump button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+  background: #183f39;
+  color: #fff8ef;
+  cursor: pointer;
 }
 
 .version-row {
