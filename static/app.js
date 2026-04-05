@@ -2,6 +2,25 @@
   const toolbarSelector = "#toolbar-shell";
   const contentSelector = "#content-root";
 
+  function closeFullscreenPreview() {
+    const active = document.querySelector("[data-preview-panel].is-fullscreen");
+    if (!active) return;
+    active.classList.remove("is-fullscreen");
+    document.body.classList.remove("preview-fullscreen");
+    const button = active.querySelector("[data-preview-toggle]");
+    if (button) button.textContent = "展开";
+  }
+
+  function togglePreview(preview) {
+    const isActive = preview.classList.contains("is-fullscreen");
+    closeFullscreenPreview();
+    if (isActive) return;
+    preview.classList.add("is-fullscreen");
+    document.body.classList.add("preview-fullscreen");
+    const button = preview.querySelector("[data-preview-toggle]");
+    if (button) button.textContent = "收起";
+  }
+
   function shouldHandleLink(anchor, event) {
     if (!anchor) return false;
     if (anchor.classList.contains("download")) return false;
@@ -58,6 +77,21 @@
   }
 
   document.addEventListener("click", (event) => {
+    const previewToggle = event.target.closest("[data-preview-toggle]");
+    if (previewToggle) {
+      const preview = previewToggle.closest("[data-preview-panel]");
+      if (!preview) return;
+      event.preventDefault();
+      togglePreview(preview);
+      return;
+    }
+
+    const fullscreenPreview = document.querySelector("[data-preview-panel].is-fullscreen");
+    if (fullscreenPreview && event.target === fullscreenPreview) {
+      closeFullscreenPreview();
+      return;
+    }
+
     const anchor = event.target.closest("a[href]");
     if (!shouldHandleLink(anchor, event)) {
       return;
@@ -85,6 +119,13 @@
   });
 
   window.addEventListener("popstate", () => {
+    closeFullscreenPreview();
     navigate(window.location.href, { replace: true });
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeFullscreenPreview();
+    }
   });
 })();

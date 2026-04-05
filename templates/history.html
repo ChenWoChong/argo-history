@@ -80,17 +80,21 @@
               {% endfor %}
             </div>
             <div class="stack">
-              <div class="preview">
-                <div class="preview-title">{{ preview_block.title }}</div>
-                <pre class="code-block yaml-block">{% for line in preview_block.lines %}<span class="{{ line.class_name }}"><span class="line-prefix">{{ line.prefix }}</span>{% for token in line.tokens %}<span class="{{ token.class_name }}">{{ token.content }}</span>{% endfor %}</span>
-{% endfor %}</pre>
+              <div class="preview" data-preview-panel>
+                <div class="preview-title">
+                  <span>{{ preview_block.title }}</span>
+                  <button class="preview-toggle" type="button" data-preview-toggle>展开</button>
+                </div>
+                <div class="code-block yaml-block">{% for line in preview_block.lines %}<span class="{{ line.class_name }}"><span class="line-prefix">{{ line.prefix }}</span>{% for token in line.tokens %}<span class="{{ token.class_name }}">{{ token.content }}</span>{% endfor %}</span>{% endfor %}</div>
               </div>
               {% match diff_block %}
               {% when Some with (diff) %}
-              <div class="preview diff">
-                <div class="preview-title">{{ diff.title }}</div>
-                <pre class="code-block diff-block">{% for line in diff.lines %}<span class="{{ line.class_name }}"><span class="line-prefix">{{ line.prefix }}</span>{% for token in line.tokens %}<span class="{{ token.class_name }}">{{ token.content }}</span>{% endfor %}</span>
-{% endfor %}</pre>
+              <div class="preview diff" data-preview-panel>
+                <div class="preview-title">
+                  <span>{{ diff.title }}</span>
+                  <button class="preview-toggle" type="button" data-preview-toggle>展开</button>
+                </div>
+                <div class="code-block diff-block">{% for line in diff.lines %}<span class="{{ line.class_name }}"><span class="line-prefix">{{ line.prefix }}</span>{% for token in line.tokens %}<span class="{{ token.class_name }}">{{ token.content }}</span>{% endfor %}</span>{% endfor %}</div>
               </div>
               {% when None %}
               <div class="empty">当前版本没有可对比的上一版本。</div>

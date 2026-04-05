@@ -230,11 +230,13 @@ a {
   display: grid;
   grid-template-columns: 360px 1fr;
   gap: 18px;
+  align-items: start;
 }
 
 .stack {
   display: grid;
   gap: 18px;
+  align-self: start;
 }
 
 .versions {
@@ -271,7 +273,8 @@ a {
 }
 
 .preview {
-  min-height: 520px;
+  position: relative;
+  height: fit-content;
   border-radius: 20px;
   background: #132329;
   color: #eef6f3;
@@ -279,24 +282,68 @@ a {
 }
 
 .preview.diff {
-  min-height: 260px;
   background: #102f34;
 }
 
 .preview-title {
   padding: 14px 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   font-weight: 700;
+}
+
+.preview-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #eef6f3;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .code-block {
   margin: 0;
   padding: 18px;
+  max-height: min(60vh, 640px);
   overflow: auto;
   font-family: "SFMono-Regular", "JetBrains Mono", monospace;
   font-size: 13px;
   line-height: 1.55;
-  white-space: pre-wrap;
+  white-space: pre;
+}
+
+.yaml-block {
+  max-height: min(54vh, 560px);
+}
+
+.diff-block {
+  max-height: min(46vh, 420px);
+}
+
+.code-block::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.code-block::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.code-block::-webkit-scrollbar-thumb {
+  background: rgba(143, 209, 255, 0.36);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.code-block::-webkit-scrollbar-thumb:hover {
+  background: rgba(143, 209, 255, 0.58);
+  background-clip: content-box;
 }
 
 .code-line {
@@ -387,6 +434,33 @@ body.is-loading .content,
 body.is-loading .toolbar-shell {
   opacity: 0.72;
   transition: opacity 120ms ease;
+}
+
+body.preview-fullscreen {
+  overflow: hidden;
+}
+
+.preview.is-fullscreen {
+  position: fixed;
+  inset: 24px;
+  z-index: 50;
+  border-radius: 24px;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.45);
+}
+
+.preview.is-fullscreen::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 18, 22, 0.48);
+  z-index: -1;
+}
+
+.preview.is-fullscreen .code-block,
+.preview.is-fullscreen.yaml-block,
+.preview.is-fullscreen .yaml-block,
+.preview.is-fullscreen .diff-block {
+  max-height: calc(100vh - 120px);
 }
 
 @media (max-width: 1080px) {
