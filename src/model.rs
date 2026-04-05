@@ -21,6 +21,7 @@ pub struct ObjectSummary {
     pub namespace: String,
     pub namespace_key: String,
     pub name: String,
+    pub source_label: String,
     pub version_count: usize,
     pub latest_timestamp: Option<String>,
 }
@@ -38,6 +39,7 @@ pub struct ObjectHistory {
     pub namespace: String,
     pub namespace_key: String,
     pub name: String,
+    pub source_label: String,
     pub versions: Vec<SnapshotMeta>,
 }
 

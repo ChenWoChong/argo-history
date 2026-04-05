@@ -14,3 +14,4 @@ data:
         key_path: /certs/tls.key
     history:
       root_dir: {{ .Values.history.rootDir }}
+      retention_days: {{ .Values.history.retentionDays }}

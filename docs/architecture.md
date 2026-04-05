@@ -4,7 +4,7 @@
 
 - 通过 admission webhook 监听 `Application` / `ApplicationSet` 的 `CREATE`、`UPDATE`、`DELETE`
 - 清洗资源中的无意义字段后，将历史快照保存到持久卷
-- 提供 Web 页面和 HTTP API 用于查看、预览、下载历史版本
+- 提供 Web 页面和 HTTP API 用于查看、搜索、预览、对比、下载历史版本
 
 ## 1. 整体架构
 
@@ -22,6 +22,13 @@ flowchart LR
 
 - `:9443`：Webhook TLS 服务
 - `:8080`：页面与 API 服务
+
+前端交互模式：
+
+- 首屏仍由服务端渲染，保证直接访问和无 JS 场景可用
+- 浏览器加载 [`static/app.js`](/Users/wochong/Documents/code/truth-ai/infras/argo-history/static/app.js) 后，会接管 tab、对象点击、版本切换和搜索提交
+- 交互时仅替换工具栏和内容区，不整页刷新
+- App 列表会拆成“直连 App”和“AppSet 生成 App”两个分组，后者默认折叠
 
 在 Kubernetes 中会暴露两个 Service：
 
@@ -55,6 +62,8 @@ flowchart LR
 - 清洗资源对象
 - 生成备份文件名
 - 将备份写入卷
+- 通过 `spawn_blocking` 避免阻塞 Tokio 请求线程
+- 对单个对象执行 14 天历史清理
 - 查询对象列表、版本列表、具体内容
 
 ### `src/admission.rs`
@@ -77,7 +86,30 @@ AdmissionReview 请求/响应模型定义。
 2. 再看对象列表
 3. 点击对象后看历史版本列表
 4. 默认预览当前版本内容
-5. 单独点击下载按钮导出文件
+5. 展示对象来源标识
+6. YAML 内容使用彩色高亮渲染
+7. 预览当前版本与上一版本的彩色 diff
+7. 单独点击下载按钮导出文件
+
+### `static/app.js`
+
+前端增强脚本，负责：
+
+- 接管站内链接点击
+- 接管搜索表单提交
+- 使用 `fetch` 拉取目标 HTML
+- 只替换 `toolbar-shell` 与 `content-root`
+- 使用 `history.pushState` / `popstate` 保持浏览器前进后退可用
+
+### 显示层增强
+
+当前页面还包含两类增强展示：
+
+- YAML 高亮：
+  - 后端会将 YAML 解析成 token 序列，按 key/string/number/bool/comment 等类别上色
+- Diff 高亮：
+  - 后端会将相邻版本生成结构化 diff
+  - 新增行、删除行、上下文行使用不同底色
 
 ## 3. 备份流程
 
@@ -163,6 +195,16 @@ YYYYMMDDTHHMMSSmmmZ
 app-update-20260404T022637770Z.yaml
 ```
 
+### 3.5 保留策略
+
+当前默认按对象保留最近 `14` 天的历史版本。
+
+行为说明：
+
+- 每次写入新快照前，会扫描该对象目录
+- 删除时间戳早于 `now - 14d` 的文件
+- 不影响其他对象目录
+
 ## 4. 页面访问路径
 
 NodePort 默认端口见 [`chart/values.yaml`](/Users/wochong/Documents/code/truth-ai/infras/argo-history/chart/values.yaml)，当前默认是 `32080`。
@@ -183,6 +225,10 @@ NodePort 默认端口见 [`chart/values.yaml`](/Users/wochong/Documents/code/tru
   - 预览某个 App 指定版本
 - `/appsets/{namespace}/{name}?version={file_name}`
   - 预览某个 AppSet 指定版本
+- `/apps?q={keyword}`
+  - 按名称、命名空间、来源标识搜索 App
+- `/appsets?q={keyword}`
+  - 按名称、命名空间、来源标识搜索 AppSet
 
 ## 5. 所有 API 接口
 
@@ -215,12 +261,14 @@ ok
 用途：
 
 - 渲染 App 页面和对象列表
+- 支持搜索
 
 #### `GET /appsets`
 
 用途：
 
 - 渲染 AppSet 页面和对象列表
+- 支持搜索
 
 #### `GET /apps/{namespace}/{name}`
 
@@ -231,6 +279,8 @@ ok
 
 Query 参数：
 
+- `q`
+  - 可选，按名称、命名空间、来源标识搜索
 - `version`
   - 可选，指定要预览的文件名
 
@@ -243,6 +293,8 @@ Query 参数：
 
 Query 参数：
 
+- `q`
+  - 可选，按名称、命名空间、来源标识搜索
 - `version`
   - 可选，指定要预览的文件名
 
@@ -262,6 +314,7 @@ Query 参数：
     "namespace": "argocd",
     "namespace_key": "argocd",
     "name": "live-app-check",
+    "source_label": "Direct Application",
     "version_count": 4,
     "latest_timestamp": "2026-04-04 02:26:37 UTC"
   }
@@ -282,6 +335,7 @@ Query 参数：
     "namespace": "argocd",
     "namespace_key": "argocd",
     "name": "live-appset-check",
+    "source_label": "ApplicationSet",
     "version_count": 3,
     "latest_timestamp": "2026-04-04 02:26:37 UTC"
   }
@@ -302,6 +356,7 @@ Query 参数：
   "namespace": "argocd",
   "namespace_key": "argocd",
   "name": "live-app-check",
+  "source_label": "Direct Application",
   "versions": [
     {
       "file_name": "app-update-20260404T022637770Z.yaml",
@@ -399,6 +454,8 @@ Chart 位于 [`chart`](/Users/wochong/Documents/code/truth-ai/infras/argo-histor
 - `Service`
   - `argo-history-ui`：NodePort
   - `argo-history-webhook`：ClusterIP
+- `ConfigMap`
+  - 注入 `root_dir` 和 `retention_days`
 - `ValidatingWebhookConfiguration`
   - 注册 `Application` / `ApplicationSet` webhook
 - `Certificate` / `Issuer`
@@ -424,4 +481,3 @@ Chart 位于 [`chart`](/Users/wochong/Documents/code/truth-ai/infras/argo-histor
 - `Application` 的 `CREATE/UPDATE/DELETE`
 - `ApplicationSet` 的 `CREATE/UPDATE/DELETE`
 - 历史 API 返回结果
-

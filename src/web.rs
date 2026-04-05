@@ -8,14 +8,19 @@ use axum::{
     routing::get,
 };
 use serde::Deserialize;
+use similar::{ChangeTag, TextDiff};
 use tower_http::services::ServeDir;
 use tracing::error;
+use urlencoding::encode;
 
 use crate::{
     admission::{AdmissionReviewRequest, AdmissionReviewResponse},
     model::{ObjectHistory, Operation, ResourceKind},
     storage::HistoryStore,
-    templates::{HistoryTemplate, SidebarObject, VersionLink},
+    templates::{
+        CodeLine, CodeToken, HighlightedBlock, HistoryTemplate, SidebarGroup, SidebarObject,
+        VersionLink,
+    },
 };
 
 #[derive(Clone)]
@@ -23,8 +28,9 @@ pub struct AppState {
     pub store: HistoryStore,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct VersionQuery {
+#[derive(Debug, Deserialize, Default)]
+pub struct PageQuery {
+    pub q: Option<String>,
     pub version: Option<String>,
 }
 
@@ -66,9 +72,10 @@ pub fn webhook_router(state: AppState) -> Router {
 async fn history_index(
     State(state): State<AppState>,
     path: axum::http::Uri,
+    Query(query): Query<PageQuery>,
 ) -> Result<Html<String>, AppError> {
     let kind = resource_from_path(path.path())?;
-    render_history_page(&state, kind, None, None).await
+    render_history_page(&state, kind, None, query).await
 }
 
 async fn history_object(
@@ -76,93 +83,148 @@ async fn history_object(
     state: AppState,
     namespace: String,
     name: String,
-    version: Option<String>,
+    query: PageQuery,
 ) -> Result<Html<String>, AppError> {
     let namespace = decode_namespace(&namespace);
-    render_history_page(&state, kind, Some((namespace, name)), version).await
+    render_history_page(&state, kind, Some((namespace, name)), query).await
 }
 
 async fn history_app_object(
     State(state): State<AppState>,
     Path((namespace, name)): Path<(String, String)>,
-    Query(query): Query<VersionQuery>,
+    Query(query): Query<PageQuery>,
 ) -> Result<Html<String>, AppError> {
-    history_object(ResourceKind::App, state, namespace, name, query.version).await
+    history_object(ResourceKind::App, state, namespace, name, query).await
 }
 
 async fn history_appset_object(
     State(state): State<AppState>,
     Path((namespace, name)): Path<(String, String)>,
-    Query(query): Query<VersionQuery>,
+    Query(query): Query<PageQuery>,
 ) -> Result<Html<String>, AppError> {
-    history_object(ResourceKind::AppSet, state, namespace, name, query.version).await
+    history_object(ResourceKind::AppSet, state, namespace, name, query).await
 }
 
 async fn render_history_page(
     state: &AppState,
     kind: ResourceKind,
     selected: Option<(String, String)>,
-    selected_version: Option<String>,
+    query: PageQuery,
 ) -> Result<Html<String>, AppError> {
-    let app_count = state.store.list_objects(ResourceKind::App)?.len();
-    let appset_count = state.store.list_objects(ResourceKind::AppSet)?.len();
-    let objects = state.store.list_objects(kind)?;
+    let search_query = query.q.unwrap_or_default();
+    let app_count = state.store.list_objects(ResourceKind::App).await?.len();
+    let appset_count = state.store.list_objects(ResourceKind::AppSet).await?.len();
+    let search_lower = search_query.to_ascii_lowercase();
+    let objects = state
+        .store
+        .list_objects(kind)
+        .await?
+        .into_iter()
+        .filter(|item| {
+            if search_lower.is_empty() {
+                return true;
+            }
+            let haystack = format!(
+                "{} {} {}",
+                item.name.to_ascii_lowercase(),
+                item.namespace.to_ascii_lowercase(),
+                item.source_label.to_ascii_lowercase()
+            );
+            haystack.contains(&search_lower)
+        })
+        .collect::<Vec<_>>();
 
     let selected_key = selected
         .as_ref()
         .map(|(namespace, name)| (crate::model::namespace_key(namespace), name.clone()));
 
-    let sidebar = objects
+    let sidebar_objects = objects
         .iter()
         .map(|item| SidebarObject {
             name: item.name.clone(),
             namespace: item.namespace.clone(),
+            source_label: item.source_label.clone(),
             latest_timestamp: item
                 .latest_timestamp
                 .clone()
                 .unwrap_or_else(|| "-".to_string()),
             version_count: item.version_count,
-            href: format!("/{}/{}/{}", kind.route(), item.namespace_key, item.name),
+            href: object_href(kind, &item.namespace_key, &item.name, &search_query, None),
             is_selected: selected_key
                 .as_ref()
                 .map(|(namespace, name)| namespace == &item.namespace_key && name == &item.name)
                 .unwrap_or(false),
         })
         .collect::<Vec<_>>();
+    let object_groups = build_sidebar_groups(kind, sidebar_objects);
 
     let mut has_selection = false;
     let mut selected_name = String::new();
     let mut selected_namespace = String::new();
+    let mut selected_source_label = String::new();
     let mut versions = Vec::new();
-    let mut preview_content = String::new();
+    let mut preview_block = HighlightedBlock {
+        title: "YAML 预览".to_string(),
+        lines: vec![plain_line("请选择一个对象查看内容。")],
+    };
+    let mut diff_block = None;
 
     if let Some((namespace, name)) = selected {
-        let history = state.store.get_history(kind, &namespace, &name)?;
+        let history = state.store.get_history(kind, &namespace, &name).await?;
         if history.versions.is_empty() {
             return Err(AppError::not_found("history"));
         }
+
         has_selection = true;
         selected_name = history.name.clone();
         selected_namespace = history.namespace.clone();
-        let active_file = selected_version
+        selected_source_label = history.source_label.clone();
+
+        let active_file = query
+            .version
             .filter(|value| history.versions.iter().any(|item| item.file_name == *value))
             .unwrap_or_else(|| history.versions[0].file_name.clone());
-        preview_content = state
+
+        let preview_content = state
             .store
             .read_snapshot(kind, &namespace, &name, &active_file)
+            .await
             .with_context(|| "read selected snapshot")?;
+        preview_block = HighlightedBlock {
+            title: "YAML 预览".to_string(),
+            lines: highlight_yaml_block(&preview_content),
+        };
+
+        let active_index = history
+            .versions
+            .iter()
+            .position(|item| item.file_name == active_file)
+            .unwrap_or(0);
+        if active_index + 1 < history.versions.len() {
+            let previous_file = history.versions[active_index + 1].file_name.clone();
+            let previous_content = state
+                .store
+                .read_snapshot(kind, &namespace, &name, &previous_file)
+                .await
+                .with_context(|| "read previous snapshot")?;
+            diff_block = Some(HighlightedBlock {
+                title: format!("差异预览: {}", previous_file),
+                lines: highlight_diff_block(&previous_content, &preview_content),
+            });
+        }
+
         versions = history
             .versions
             .into_iter()
             .map(|item| VersionLink {
                 title: format!("{} / {}", item.operation, item.file_name),
                 timestamp: item.timestamp,
-                href: format!(
-                    "/{}/{}/{}?version={}",
-                    kind.route(),
-                    crate::model::namespace_key(&namespace),
-                    name,
-                    item.file_name
+                href: object_href(
+                    kind,
+                    &crate::model::namespace_key(&namespace),
+                    &name,
+                    &search_query,
+                    Some(&item.file_name),
                 ),
                 download_href: format!(
                     "/download/{}/{}/{}/{}",
@@ -178,14 +240,20 @@ async fn render_history_page(
 
     let template = HistoryTemplate {
         active_route: kind.route(),
+        apps_href: collection_href(ResourceKind::App, &search_query),
+        appsets_href: collection_href(ResourceKind::AppSet, &search_query),
+        search_action: format!("/{}", kind.route()),
         app_count,
         appset_count,
-        objects: sidebar,
+        object_groups,
+        search_query,
         has_selection,
         selected_name,
         selected_namespace,
+        selected_source_label,
         versions,
-        preview_content,
+        preview_block,
+        diff_block,
     };
 
     let body = template
@@ -200,7 +268,7 @@ async fn list_api(
 ) -> Result<Json<Vec<crate::model::ObjectSummary>>, AppError> {
     let kind =
         ResourceKind::from_route(&resource).ok_or_else(|| AppError::not_found("resource"))?;
-    Ok(Json(state.store.list_objects(kind)?))
+    Ok(Json(state.store.list_objects(kind).await?))
 }
 
 async fn object_api(
@@ -209,11 +277,12 @@ async fn object_api(
 ) -> Result<Json<ObjectHistory>, AppError> {
     let kind =
         ResourceKind::from_route(&resource).ok_or_else(|| AppError::not_found("resource"))?;
-    Ok(Json(state.store.get_history(
-        kind,
-        &decode_namespace(&namespace),
-        &name,
-    )?))
+    Ok(Json(
+        state
+            .store
+            .get_history(kind, &decode_namespace(&namespace), &name)
+            .await?,
+    ))
 }
 
 async fn download_snapshot(
@@ -222,10 +291,10 @@ async fn download_snapshot(
 ) -> Result<Response, AppError> {
     let kind =
         ResourceKind::from_route(&resource).ok_or_else(|| AppError::not_found("resource"))?;
-    let content =
-        state
-            .store
-            .read_snapshot(kind, &decode_namespace(&namespace), &name, &file_name)?;
+    let content = state
+        .store
+        .read_snapshot(kind, &decode_namespace(&namespace), &name, &file_name)
+        .await?;
     Ok((
         [
             (header::CONTENT_TYPE, "application/yaml"),
@@ -243,17 +312,17 @@ async fn application_webhook(
     State(state): State<AppState>,
     Json(review): Json<AdmissionReviewRequest>,
 ) -> Json<AdmissionReviewResponse> {
-    Json(handle_admission(&state, ResourceKind::App, review))
+    Json(handle_admission(&state, ResourceKind::App, review).await)
 }
 
 async fn applicationset_webhook(
     State(state): State<AppState>,
     Json(review): Json<AdmissionReviewRequest>,
 ) -> Json<AdmissionReviewResponse> {
-    Json(handle_admission(&state, ResourceKind::AppSet, review))
+    Json(handle_admission(&state, ResourceKind::AppSet, review).await)
 }
 
-fn handle_admission(
+async fn handle_admission(
     state: &AppState,
     kind: ResourceKind,
     review: AdmissionReviewRequest,
@@ -278,7 +347,7 @@ fn handle_admission(
     };
 
     if let Some(manifest) = manifest {
-        match state.store.save_snapshot(kind, operation, manifest) {
+        match state.store.save_snapshot(kind, operation, manifest).await {
             Ok(result) => {
                 tracing::info!(
                     resource = kind.route(),
@@ -301,6 +370,334 @@ fn handle_admission(
     }
 
     AdmissionReviewResponse::allow(request.uid)
+}
+
+fn build_sidebar_groups(kind: ResourceKind, objects: Vec<SidebarObject>) -> Vec<SidebarGroup> {
+    if kind == ResourceKind::AppSet {
+        return vec![SidebarGroup {
+            title: "AppSet 对象".to_string(),
+            count: objects.len(),
+            open: true,
+            objects,
+        }];
+    }
+
+    let mut direct = Vec::new();
+    let mut generated = Vec::new();
+    for object in objects {
+        if object.source_label.starts_with("Generated by AppSet/") {
+            generated.push(object);
+        } else {
+            direct.push(object);
+        }
+    }
+
+    let mut groups = Vec::new();
+    if !direct.is_empty() {
+        groups.push(SidebarGroup {
+            title: "直连 App".to_string(),
+            count: direct.len(),
+            open: true,
+            objects: direct,
+        });
+    }
+    if !generated.is_empty() {
+        groups.push(SidebarGroup {
+            title: "AppSet 生成 App".to_string(),
+            count: generated.len(),
+            open: false,
+            objects: generated,
+        });
+    }
+    groups
+}
+
+fn highlight_yaml_block(content: &str) -> Vec<CodeLine> {
+    split_lines(content)
+        .into_iter()
+        .map(|line| CodeLine {
+            class_name: "code-line yaml-line".to_string(),
+            prefix: String::new(),
+            tokens: tokenize_yaml_line(&line),
+        })
+        .collect()
+}
+
+fn highlight_diff_block(previous: &str, current: &str) -> Vec<CodeLine> {
+    let diff = TextDiff::from_lines(previous, current);
+    let mut has_changes = false;
+    let mut lines = Vec::new();
+
+    for change in diff.iter_all_changes() {
+        let (class_name, prefix) = match change.tag() {
+            ChangeTag::Delete => {
+                has_changes = true;
+                ("code-line diff-line diff-remove", "- ")
+            }
+            ChangeTag::Insert => {
+                has_changes = true;
+                ("code-line diff-line diff-add", "+ ")
+            }
+            ChangeTag::Equal => ("code-line diff-line diff-context", "  "),
+        };
+
+        for line in split_lines(change.value()) {
+            lines.push(CodeLine {
+                class_name: class_name.to_string(),
+                prefix: prefix.to_string(),
+                tokens: tokenize_yaml_line(&line),
+            });
+        }
+    }
+
+    if !has_changes {
+        return vec![plain_line("当前版本与上一版本无内容差异。")];
+    }
+
+    lines
+}
+
+fn split_lines(content: &str) -> Vec<String> {
+    let mut lines = content
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r').to_string())
+        .collect::<Vec<_>>();
+    if lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn plain_line(message: &str) -> CodeLine {
+    CodeLine {
+        class_name: "code-line diff-note".to_string(),
+        prefix: String::new(),
+        tokens: vec![CodeToken {
+            class_name: "tok-plain".to_string(),
+            content: message.to_string(),
+        }],
+    }
+}
+
+fn tokenize_yaml_line(line: &str) -> Vec<CodeToken> {
+    let mut tokens = Vec::new();
+    if line.is_empty() {
+        return tokens;
+    }
+
+    let indent_len = line.chars().take_while(|char| char.is_whitespace()).count();
+    if indent_len > 0 {
+        tokens.push(CodeToken {
+            class_name: "tok-indent".to_string(),
+            content: line[..indent_len].to_string(),
+        });
+    }
+
+    let mut rest = &line[indent_len..];
+    if rest.starts_with("- ") {
+        tokens.push(CodeToken {
+            class_name: "tok-list".to_string(),
+            content: "- ".to_string(),
+        });
+        rest = &rest[2..];
+    }
+
+    if rest.trim_start().starts_with('#') {
+        tokens.push(CodeToken {
+            class_name: "tok-comment".to_string(),
+            content: rest.to_string(),
+        });
+        return tokens;
+    }
+
+    if let Some(separator) = find_yaml_key_separator(rest) {
+        let key = &rest[..separator];
+        let after_key = &rest[separator..];
+        if !key.is_empty() {
+            tokens.push(CodeToken {
+                class_name: "tok-key".to_string(),
+                content: key.to_string(),
+            });
+        }
+
+        if after_key.starts_with(": ") {
+            tokens.push(CodeToken {
+                class_name: "tok-punct".to_string(),
+                content: ":".to_string(),
+            });
+            tokens.push(CodeToken {
+                class_name: "tok-space".to_string(),
+                content: " ".to_string(),
+            });
+            tokens.extend(tokenize_value_tokens(&after_key[2..]));
+            return tokens;
+        }
+
+        if after_key == ":" {
+            tokens.push(CodeToken {
+                class_name: "tok-punct".to_string(),
+                content: ":".to_string(),
+            });
+            return tokens;
+        }
+    }
+
+    tokens.extend(tokenize_value_tokens(rest));
+    tokens
+}
+
+fn find_yaml_key_separator(line: &str) -> Option<usize> {
+    let mut single_quote = false;
+    let mut double_quote = false;
+    let chars = line.char_indices().peekable();
+
+    for (index, char) in chars {
+        match char {
+            '\'' if !double_quote => single_quote = !single_quote,
+            '"' if !single_quote => double_quote = !double_quote,
+            ':' if !single_quote && !double_quote => {
+                let tail = &line[index..];
+                if tail == ":" || tail.starts_with(": ") {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn tokenize_value_tokens(value: &str) -> Vec<CodeToken> {
+    let mut tokens = Vec::new();
+    let chars = value.chars().collect::<Vec<_>>();
+    let mut index = 0;
+
+    while index < chars.len() {
+        let current = chars[index];
+
+        if current.is_whitespace() {
+            let start = index;
+            while index < chars.len() && chars[index].is_whitespace() {
+                index += 1;
+            }
+            tokens.push(CodeToken {
+                class_name: "tok-space".to_string(),
+                content: chars[start..index].iter().collect(),
+            });
+            continue;
+        }
+
+        if current == '#' {
+            tokens.push(CodeToken {
+                class_name: "tok-comment".to_string(),
+                content: chars[index..].iter().collect(),
+            });
+            break;
+        }
+
+        if matches!(current, '[' | ']' | '{' | '}' | ':' | ',') {
+            tokens.push(CodeToken {
+                class_name: "tok-punct".to_string(),
+                content: current.to_string(),
+            });
+            index += 1;
+            continue;
+        }
+
+        if current == '"' || current == '\'' {
+            let quote = current;
+            let start = index;
+            index += 1;
+            while index < chars.len() {
+                if chars[index] == quote {
+                    index += 1;
+                    break;
+                }
+                index += 1;
+            }
+            tokens.push(CodeToken {
+                class_name: "tok-string".to_string(),
+                content: chars[start..index].iter().collect(),
+            });
+            continue;
+        }
+
+        let start = index;
+        while index < chars.len()
+            && !chars[index].is_whitespace()
+            && !matches!(chars[index], '[' | ']' | '{' | '}' | ':' | ',' | '#')
+        {
+            index += 1;
+        }
+        let word = chars[start..index].iter().collect::<String>();
+        tokens.push(CodeToken {
+            class_name: classify_scalar(&word).to_string(),
+            content: word,
+        });
+    }
+
+    tokens
+}
+
+fn classify_scalar(word: &str) -> &'static str {
+    if word.is_empty() {
+        return "tok-plain";
+    }
+    if matches!(
+        word,
+        "true" | "false" | "yes" | "no" | "on" | "off" | "True" | "False" | "YES" | "NO"
+    ) {
+        return "tok-bool";
+    }
+    if matches!(word, "null" | "Null" | "NULL" | "~") {
+        return "tok-null";
+    }
+    if word.parse::<i64>().is_ok() || word.parse::<f64>().is_ok() {
+        return "tok-number";
+    }
+    if word.contains("://") {
+        return "tok-string";
+    }
+    "tok-plain"
+}
+
+fn collection_href(kind: ResourceKind, search_query: &str) -> String {
+    if search_query.is_empty() {
+        return format!("/{}", kind.route());
+    }
+    format!("/{0}?q={1}", kind.route(), encode(search_query))
+}
+
+fn object_href(
+    kind: ResourceKind,
+    namespace: &str,
+    name: &str,
+    search_query: &str,
+    version: Option<&str>,
+) -> String {
+    let mut query = Vec::new();
+    if !search_query.is_empty() {
+        query.push(format!("q={}", encode(search_query)));
+    }
+    if let Some(version) = version {
+        query.push(format!("version={}", encode(version)));
+    }
+
+    if query.is_empty() {
+        format!("/{}/{}/{}", kind.route(), namespace, name)
+    } else {
+        format!(
+            "/{}/{}/{}?{}",
+            kind.route(),
+            namespace,
+            name,
+            query.join("&")
+        )
+    }
 }
 
 fn resource_from_path(path: &str) -> Result<ResourceKind, AppError> {

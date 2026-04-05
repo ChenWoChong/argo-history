@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     let settings = Settings::load(&cli.config)?;
-    let store = HistoryStore::new(&settings.history.root_dir)?;
+    let store = HistoryStore::new(&settings.history.root_dir, settings.history.retention_days)?;
     let state = AppState { store };
 
     let http_router = web::http_router(state.clone()).layer(TraceLayer::new_for_http());

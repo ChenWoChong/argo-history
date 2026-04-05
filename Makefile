@@ -22,8 +22,18 @@ check:
 build:
 	cargo build --release
 
+.PHONY: build-linux
+build-linux:
+	docker run --rm --platform linux/arm64 \
+		-v "$(CURDIR):/workspace" \
+		-v "$(HOME)/.cargo/registry:/usr/local/cargo/registry" \
+		-v "$(HOME)/.cargo/git:/usr/local/cargo/git" \
+		-w /workspace \
+		rust:1.94-bookworm \
+		cargo build --release --target-dir target-linux
+
 .PHONY: docker-build
-docker-build:
+docker-build: build-linux
 	docker build -t $(IMG) .
 
 .PHONY: helm-template

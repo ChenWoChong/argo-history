@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Argo History</title>
     <link rel="stylesheet" href="/static/style.css" />
+    <script defer src="/static/app.js"></script>
   </head>
   <body>
     <div class="shell">
@@ -14,26 +15,44 @@
         <p>Webhook 会在 CREATE、UPDATE、DELETE 时自动落盘备份。页面先按资源类型切分，再查看具体对象和历史版本。</p>
       </header>
 
-      <nav class="tabs">
-        <a class="tab {% if active_route == "apps" %}active{% endif %}" href="/apps">App <span>{{ app_count }}</span></a>
-        <a class="tab {% if active_route == "appsets" %}active{% endif %}" href="/appsets">AppSet <span>{{ appset_count }}</span></a>
-      </nav>
+      <section id="toolbar-shell" class="toolbar-shell">
+        <nav class="tabs">
+          <a class="tab {% if active_route == "apps" %}active{% endif %}" href="{{ apps_href }}">App <span>{{ app_count }}</span></a>
+          <a class="tab {% if active_route == "appsets" %}active{% endif %}" href="{{ appsets_href }}">AppSet <span>{{ appset_count }}</span></a>
+        </nav>
 
-      <main class="content">
+        <form class="search search-wide" method="get" action="{{ search_action }}" data-spa-search>
+          <input type="search" name="q" value="{{ search_query }}" placeholder="按名称、命名空间、来源搜索" />
+          <button type="submit">搜索</button>
+        </form>
+      </section>
+
+      <main id="content-root" class="content">
         <aside class="panel sidebar">
           <div class="panel-header">
             <h2>{% if active_route == "apps" %}App 列表{% else %}AppSet 列表{% endif %}</h2>
           </div>
-          {% if objects.is_empty() %}
+          {% if object_groups.is_empty() %}
           <div class="empty">当前还没有历史对象。</div>
           {% else %}
-          <div class="list">
-            {% for object in objects %}
-            <a class="object-card {% if object.is_selected %}selected{% endif %}" href="{{ object.href }}">
-              <div class="object-title">{{ object.name }}</div>
-              <div class="muted">{{ object.namespace }}</div>
-              <div class="muted">版本 {{ object.version_count }} / 最近 {{ object.latest_timestamp }}</div>
-            </a>
+          <div class="group-list">
+            {% for group in object_groups %}
+            <details class="group" {% if group.open %}open{% endif %}>
+              <summary class="group-summary">
+                <span>{{ group.title }}</span>
+                <span class="group-count">{{ group.count }}</span>
+              </summary>
+              <div class="list">
+                {% for object in group.objects %}
+                <a class="object-card {% if object.is_selected %}selected{% endif %}" href="{{ object.href }}">
+                  <div class="object-title">{{ object.name }}</div>
+                  <div class="muted">{{ object.namespace }}</div>
+                  <div class="pill">{{ object.source_label }}</div>
+                  <div class="muted">版本 {{ object.version_count }} / 最近 {{ object.latest_timestamp }}</div>
+                </a>
+                {% endfor %}
+              </div>
+            </details>
             {% endfor %}
           </div>
           {% endif %}
@@ -45,6 +64,7 @@
             <div>
               <h2>{{ selected_name }}</h2>
               <p class="muted">{{ selected_namespace }}</p>
+              <div class="pill strong">{{ selected_source_label }}</div>
             </div>
           </div>
           <div class="detail-grid">
@@ -59,9 +79,22 @@
               </div>
               {% endfor %}
             </div>
-            <div class="preview">
-              <div class="preview-title">内容预览</div>
-              <pre>{{ preview_content }}</pre>
+            <div class="stack">
+              <div class="preview">
+                <div class="preview-title">{{ preview_block.title }}</div>
+                <pre class="code-block yaml-block">{% for line in preview_block.lines %}<span class="{{ line.class_name }}"><span class="line-prefix">{{ line.prefix }}</span>{% for token in line.tokens %}<span class="{{ token.class_name }}">{{ token.content }}</span>{% endfor %}</span>
+{% endfor %}</pre>
+              </div>
+              {% match diff_block %}
+              {% when Some with (diff) %}
+              <div class="preview diff">
+                <div class="preview-title">{{ diff.title }}</div>
+                <pre class="code-block diff-block">{% for line in diff.lines %}<span class="{{ line.class_name }}"><span class="line-prefix">{{ line.prefix }}</span>{% for token in line.tokens %}<span class="{{ token.class_name }}">{{ token.content }}</span>{% endfor %}</span>
+{% endfor %}</pre>
+              </div>
+              {% when None %}
+              <div class="empty">当前版本没有可对比的上一版本。</div>
+              {% endmatch %}
             </div>
           </div>
           {% else %}

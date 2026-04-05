@@ -11,8 +11,12 @@
 - Validating admission webhook 拦截 `CREATE`、`UPDATE`、`DELETE`
 - 将 `Application` / `ApplicationSet` 的清洗后版本保存到持久卷
 - 文件命名格式为 `app-操作-时间.yaml` 或 `appset-操作-时间.yaml`
+- 默认按对象保留最近 14 天历史
 - 自带 Web 查看页面，按 `App` 和 `AppSet` 分栏查看历史
-- 支持默认查看内容和单独下载版本文件
+- 前端通过局部刷新更新对象列表和详情区，不再每次整页跳转
+- App 列表会把 `AppSet` 生成的 `App` 单独折叠分组
+- YAML 预览和 diff 预览均为彩色高亮显示
+- 支持搜索、来源标识、默认查看内容、diff 预览和单独下载版本文件
 
 ## 常用命令
 

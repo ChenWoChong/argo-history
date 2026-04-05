@@ -64,8 +64,15 @@ sleep 5
 
 curl -fsSL "http://127.0.0.1:${NODEPORT}/api/v1/apps" >/tmp/argo-history-apps.json
 curl -fsSL "http://127.0.0.1:${NODEPORT}/api/v1/appsets" >/tmp/argo-history-appsets.json
+curl -fsSL "http://127.0.0.1:${NODEPORT}/apps" >/tmp/argo-history-apps-shell.html
+curl -fsSL "http://127.0.0.1:${NODEPORT}/apps/argocd/history-demo-app" >/tmp/argo-history-app-page.html
+curl -fsSL "http://127.0.0.1:${NODEPORT}/appsets/argocd/history-demo?q=history" >/tmp/argo-history-appset-page.html
 
 grep -q "history-demo" /tmp/argo-history-appsets.json
 grep -q "history-demo-app" /tmp/argo-history-apps.json
+grep -q "toolbar-shell" /tmp/argo-history-apps-shell.html
+grep -q "/static/app.js" /tmp/argo-history-apps-shell.html
+grep -q "差异预览" /tmp/argo-history-app-page.html
+grep -q "history-demo" /tmp/argo-history-appset-page.html
 
 echo "Smoke test passed"

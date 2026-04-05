@@ -12,6 +12,7 @@ service:
 
 history:
   rootDir: /var/lib/argo-history
+  retentionDays: 14
   persistence:
     enabled: true
     existingClaim: ""

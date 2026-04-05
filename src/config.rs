@@ -33,6 +33,8 @@ pub struct TlsSettings {
 pub struct HistorySettings {
     #[serde(default = "default_history_root_dir")]
     pub root_dir: String,
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u64,
 }
 
 impl Settings {
@@ -77,6 +79,7 @@ impl Default for HistorySettings {
     fn default() -> Self {
         Self {
             root_dir: default_history_root_dir(),
+            retention_days: default_retention_days(),
         }
     }
 }
@@ -99,4 +102,8 @@ fn default_key_path() -> String {
 
 fn default_history_root_dir() -> String {
     "/var/lib/argo-history".to_string()
+}
+
+fn default_retention_days() -> u64 {
+    14
 }
