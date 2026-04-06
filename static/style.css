@@ -367,8 +367,20 @@ a {
   justify-content: space-between;
   gap: 12px;
   font-weight: 700;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: inherit;
+  backdrop-filter: blur(8px);
 }
 
+.preview-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preview-copy,
 .preview-toggle {
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.06);
@@ -378,6 +390,12 @@ a {
   font: inherit;
   font-size: 12px;
   cursor: pointer;
+}
+
+.preview-copy.is-copied {
+  background: rgba(138, 224, 181, 0.18);
+  border-color: rgba(138, 224, 181, 0.42);
+  color: #d8ffea;
 }
 
 .code-block {
@@ -530,11 +548,46 @@ body.preview-fullscreen {
   z-index: -1;
 }
 
+.preview.is-fullscreen .preview-title {
+  position: sticky;
+  top: 0;
+}
+
 .preview.is-fullscreen .code-block,
 .preview.is-fullscreen.yaml-block,
 .preview.is-fullscreen .yaml-block,
 .preview.is-fullscreen .diff-block {
   max-height: calc(100vh - 120px);
+}
+
+.toast-layer {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 10px;
+  z-index: 80;
+  justify-items: center;
+}
+
+.toast {
+  min-width: 220px;
+  max-width: min(420px, calc(100vw - 48px));
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(19, 35, 41, 0.92);
+  color: #eef6f3;
+  box-shadow: 0 16px 40px rgba(19, 35, 41, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 @media (max-width: 1080px) {

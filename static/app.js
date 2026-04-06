@@ -1,6 +1,63 @@
 (() => {
   const toolbarSelector = "#toolbar-shell";
   const contentSelector = "#content-root";
+  let toastLayer;
+
+  function ensureToastLayer() {
+    if (toastLayer && document.body.contains(toastLayer)) return toastLayer;
+    toastLayer = document.createElement("div");
+    toastLayer.className = "toast-layer";
+    document.body.appendChild(toastLayer);
+    return toastLayer;
+  }
+
+  function showToast(message) {
+    const layer = ensureToastLayer();
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.textContent = message;
+    layer.appendChild(toast);
+    window.requestAnimationFrame(() => toast.classList.add("is-visible"));
+    window.setTimeout(() => {
+      toast.classList.remove("is-visible");
+      window.setTimeout(() => toast.remove(), 180);
+    }, 1800);
+  }
+
+  function extractCodeText(codeBlock) {
+    const lines = [...codeBlock.querySelectorAll(".code-line")];
+    if (lines.length === 0) {
+      return codeBlock.textContent || "";
+    }
+
+    return lines
+      .map((line) => {
+        const prefix = line.querySelector(".line-prefix")?.textContent || "";
+        const tokens = [...line.children]
+          .filter((child) => !child.classList.contains("line-prefix"))
+          .map((child) => child.textContent || "")
+          .join("");
+        return `${prefix}${tokens}`;
+      })
+      .join("\n");
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }
 
   function closeFullscreenPreview() {
     const active = document.querySelector("[data-preview-panel].is-fullscreen");
@@ -91,6 +148,28 @@
     const groupContent = event.target.closest("[data-group-content]");
     if (groupContent) {
       event.stopPropagation();
+    }
+
+    const copyButton = event.target.closest("[data-copy-code]");
+    if (copyButton) {
+      const preview = copyButton.closest("[data-preview-panel]");
+      const codeBlock = preview?.querySelector(".code-block");
+      if (!codeBlock) return;
+      event.preventDefault();
+      const text = extractCodeText(codeBlock);
+      copyText(text).then(() => {
+        const previous = copyButton.textContent;
+        copyButton.classList.add("is-copied");
+        copyButton.textContent = "已复制";
+        showToast("YAML 已复制到剪切板");
+        window.setTimeout(() => {
+          copyButton.classList.remove("is-copied");
+          copyButton.textContent = previous || "复制";
+        }, 1200);
+      }).catch(() => {
+        showToast("复制失败，请重试");
+      });
+      return;
     }
 
     const previewToggle = event.target.closest("[data-preview-toggle]");
