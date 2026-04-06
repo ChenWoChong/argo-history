@@ -73,7 +73,7 @@
             {% endfor %}
             <form class="page-jump" method="get" action="{{ pagination.form_action }}" data-spa-search>
               <input type="hidden" name="q" value="{{ search_query }}" />
-              <input type="number" min="1" name="{{ pagination.input_name }}" placeholder="页码" />
+              <input type="number" min="1" max="{{ pagination.total_pages }}" name="{{ pagination.input_name }}" placeholder="{{ pagination.input_placeholder }}" />
               <button type="submit">跳转</button>
             </form>
           </nav>
@@ -124,7 +124,7 @@
                   <input type="hidden" name="q" value="{{ search_query }}" />
                   <input type="hidden" name="objects_page" value="{{ current_objects_page }}" />
                   <input type="hidden" name="version" value="" />
-                  <input type="number" min="1" name="{{ pagination.input_name }}" placeholder="页码" />
+                  <input type="number" min="1" max="{{ pagination.total_pages }}" name="{{ pagination.input_name }}" placeholder="{{ pagination.input_placeholder }}" />
                   <button type="submit">跳转</button>
                 </form>
               </nav>

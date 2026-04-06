@@ -34,6 +34,7 @@ pub struct Pagination {
     pub form_action: String,
     pub total_items: usize,
     pub total_pages: usize,
+    pub input_placeholder: String,
 }
 
 #[derive(Debug, Clone)]

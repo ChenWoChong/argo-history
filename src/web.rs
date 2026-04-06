@@ -922,6 +922,7 @@ where
         form_action,
         total_items,
         total_pages: total,
+        input_placeholder: format!("1 / {total}"),
     })
 }
 
