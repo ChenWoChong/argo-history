@@ -453,18 +453,20 @@ fn build_sidebar_groups(kind: ResourceKind, objects: Vec<SidebarObject>) -> Vec<
 
     let mut groups = Vec::new();
     if !direct.is_empty() {
+        let direct_open = direct.iter().any(|item| item.is_selected);
         groups.push(SidebarGroup {
             title: "直连 App".to_string(),
             count: direct.len(),
-            open: true,
+            open: direct_open || generated.is_empty(),
             objects: direct,
         });
     }
     if !generated.is_empty() {
+        let generated_open = generated.iter().any(|item| item.is_selected);
         groups.push(SidebarGroup {
             title: "AppSet 生成 App".to_string(),
             count: generated.len(),
-            open: false,
+            open: generated_open,
             objects: generated,
         });
     }

@@ -88,6 +88,11 @@
   }
 
   document.addEventListener("click", (event) => {
+    const groupContent = event.target.closest("[data-group-content]");
+    if (groupContent) {
+      event.stopPropagation();
+    }
+
     const previewToggle = event.target.closest("[data-preview-toggle]");
     if (previewToggle) {
       const preview = previewToggle.closest("[data-preview-panel]");

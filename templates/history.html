@@ -38,11 +38,11 @@
           <div class="group-list">
             {% for group in object_groups %}
             <details class="group" {% if group.open %}open{% endif %}>
-              <summary class="group-summary">
+              <summary class="group-summary" data-group-summary>
                 <span>{{ group.title }}</span>
                 <span class="group-count">{{ group.count }}</span>
               </summary>
-              <div class="list">
+              <div class="list" data-group-content>
                 {% for object in group.objects %}
                 <a class="object-card {% if object.is_selected %}selected{% endif %}" href="{{ object.href }}">
                   <div class="object-title">{{ object.name }}</div>
