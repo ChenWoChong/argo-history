@@ -31,6 +31,18 @@ pub struct SnapshotMeta {
     pub file_name: String,
     pub operation: String,
     pub timestamp: String,
+    pub timestamp_rfc3339: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ObjectOverview {
+    pub first_backup_at: String,
+    pub latest_backup_at: String,
+    pub total_versions: usize,
+    pub latest_operation: String,
+    pub source_label: String,
+    pub retention_days: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,6 +52,7 @@ pub struct ObjectHistory {
     pub namespace_key: String,
     pub name: String,
     pub source_label: String,
+    pub overview: ObjectOverview,
     pub versions: Vec<SnapshotMeta>,
 }
 

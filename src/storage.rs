@@ -11,8 +11,8 @@ use serde_json::{Map, Value};
 use tokio::task;
 
 use crate::model::{
-    ObjectHistory, ObjectSummary, Operation, ResourceKind, SnapshotMeta, display_timestamp,
-    namespace_display, namespace_key,
+    ObjectHistory, ObjectOverview, ObjectSummary, Operation, ResourceKind, SnapshotMeta,
+    display_timestamp, namespace_display, namespace_key,
 };
 
 #[derive(Clone)]
@@ -38,6 +38,7 @@ struct ParsedFileName {
 struct VersionEntry {
     meta: SnapshotMeta,
     timestamp: DateTime<Utc>,
+    manifest: Value,
 }
 
 impl HistoryStore {
@@ -106,6 +107,10 @@ impl HistoryStore {
         task::spawn_blocking(move || store.read_snapshot_sync(kind, &namespace, &name, &file_name))
             .await
             .map_err(|error| anyhow!("join read snapshot task: {error}"))?
+    }
+
+    pub fn retention_days(&self) -> u64 {
+        self.retention_days
     }
 
     fn save_snapshot_sync(
@@ -203,8 +208,10 @@ impl HistoryStore {
         namespace: &str,
         name: &str,
     ) -> Result<ObjectHistory> {
-        let versions = self.list_versions_sync(kind, namespace, name)?;
+        let mut versions = self.list_versions_sync(kind, namespace, name)?;
         let source_label = self.latest_source_label(kind, namespace, name, &versions)?;
+        let overview = build_object_overview(&versions, &source_label, self.retention_days);
+        enrich_version_summaries(&mut versions);
 
         Ok(ObjectHistory {
             resource: kind.route().to_string(),
@@ -212,6 +219,7 @@ impl HistoryStore {
             namespace_key: namespace_key(namespace),
             name: name.to_string(),
             source_label,
+            overview,
             versions: versions.into_iter().map(|item| item.meta).collect(),
         })
     }
@@ -235,13 +243,20 @@ impl HistoryStore {
             }
             let file_name = entry.file_name().to_string_lossy().to_string();
             let parsed = parse_file_name(kind, &file_name)?;
+            let content = fs::read_to_string(entry.path())
+                .with_context(|| format!("read {}", entry.path().display()))?;
+            let manifest =
+                serde_yaml::from_str::<Value>(&content).with_context(|| "parse snapshot yaml")?;
             versions.push(VersionEntry {
                 meta: SnapshotMeta {
                     file_name,
                     operation: parsed.operation.to_uppercase(),
                     timestamp: display_timestamp(parsed.timestamp),
+                    timestamp_rfc3339: parsed.timestamp.to_rfc3339(),
+                    summary: String::new(),
                 },
                 timestamp: parsed.timestamp,
+                manifest,
             });
         }
 
@@ -397,6 +412,138 @@ fn parse_timestamp(value: &str) -> Result<DateTime<Utc>> {
         .parse::<u32>()
         .with_context(|| "parse milliseconds")?;
     Ok(naive.and_utc() + Duration::milliseconds(i64::from(millis)))
+}
+
+fn build_object_overview(
+    versions: &[VersionEntry],
+    source_label: &str,
+    retention_days: u64,
+) -> ObjectOverview {
+    let latest = versions.first().map(|item| &item.meta);
+    let oldest = versions.last().map(|item| &item.meta);
+    ObjectOverview {
+        first_backup_at: oldest
+            .map(|item| item.timestamp.clone())
+            .unwrap_or_else(|| "-".to_string()),
+        latest_backup_at: latest
+            .map(|item| item.timestamp.clone())
+            .unwrap_or_else(|| "-".to_string()),
+        total_versions: versions.len(),
+        latest_operation: latest
+            .map(|item| item.operation.clone())
+            .unwrap_or_else(|| "-".to_string()),
+        source_label: source_label.to_string(),
+        retention_days,
+    }
+}
+
+fn enrich_version_summaries(versions: &mut [VersionEntry]) {
+    for index in 0..versions.len() {
+        let summary = match versions[index].meta.operation.as_str() {
+            "CREATE" => "对象首次进入历史备份".to_string(),
+            "DELETE" => "对象从集群中删除".to_string(),
+            "UPDATE" => {
+                if let Some(previous) = versions.get(index + 1) {
+                    summarize_manifest_change(&versions[index].manifest, &previous.manifest)
+                } else {
+                    "对象内容已更新".to_string()
+                }
+            }
+            _ => "对象发生变化".to_string(),
+        };
+        versions[index].meta.summary = summary;
+    }
+}
+
+fn summarize_manifest_change(current: &Value, previous: &Value) -> String {
+    let current_map = flatten_manifest(current);
+    let previous_map = flatten_manifest(previous);
+
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut changed = Vec::new();
+
+    for key in current_map.keys() {
+        if !previous_map.contains_key(key) {
+            added.push(key.clone());
+        } else if previous_map.get(key) != current_map.get(key) {
+            changed.push(key.clone());
+        }
+    }
+
+    for key in previous_map.keys() {
+        if !current_map.contains_key(key) {
+            removed.push(key.clone());
+        }
+    }
+
+    let mut parts = Vec::new();
+    if !changed.is_empty() {
+        parts.push(format!("修改 {}", summarize_paths(&changed)));
+    }
+    if !added.is_empty() {
+        parts.push(format!("新增 {}", summarize_paths(&added)));
+    }
+    if !removed.is_empty() {
+        parts.push(format!("删除 {}", summarize_paths(&removed)));
+    }
+
+    if parts.is_empty() {
+        "对象内容已更新".to_string()
+    } else {
+        parts.join("，")
+    }
+}
+
+fn summarize_paths(paths: &[String]) -> String {
+    let shown = paths.iter().take(2).cloned().collect::<Vec<_>>();
+    if paths.len() <= 2 {
+        shown.join("、")
+    } else {
+        format!("{} 等 {} 项", shown.join("、"), paths.len())
+    }
+}
+
+fn flatten_manifest(value: &Value) -> BTreeMap<String, String> {
+    let mut output = BTreeMap::new();
+    flatten_manifest_inner(value, "", &mut output);
+    output
+}
+
+fn flatten_manifest_inner(value: &Value, prefix: &str, out: &mut BTreeMap<String, String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, item) in map {
+                let next = if prefix.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                flatten_manifest_inner(item, &next, out);
+            }
+        }
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                let next = format!("{prefix}[{index}]");
+                flatten_manifest_inner(item, &next, out);
+            }
+        }
+        _ => {
+            if !prefix.is_empty() {
+                out.insert(prefix.to_string(), scalar_value(value));
+            }
+        }
+    }
+}
+
+fn scalar_value(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => value.to_string(),
+        _ => value.to_string(),
+    }
 }
 
 pub fn sanitize_manifest(raw_manifest: &Value) -> Result<Value> {

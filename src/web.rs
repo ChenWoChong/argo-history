@@ -18,8 +18,8 @@ use crate::{
     model::{ObjectHistory, Operation, ResourceKind},
     storage::HistoryStore,
     templates::{
-        CodeLine, CodeToken, HighlightedBlock, HistoryTemplate, Pagination, PaginationLink,
-        SidebarGroup, SidebarObject, VersionLink,
+        CodeLine, CodeToken, FilterChip, HighlightedBlock, HistoryTemplate, Pagination,
+        PaginationLink, SidebarGroup, SidebarObject, TimelineGroup, VersionLink,
     },
 };
 
@@ -36,6 +36,8 @@ pub struct PageQuery {
     pub version: Option<String>,
     pub objects_page: Option<usize>,
     pub versions_page: Option<usize>,
+    pub ops: Option<String>,
+    pub range: Option<String>,
 }
 
 pub fn http_router(state: AppState) -> Router {
@@ -116,6 +118,8 @@ async fn render_history_page(
     query: PageQuery,
 ) -> Result<Html<String>, AppError> {
     let search_query = query.q.unwrap_or_default();
+    let selected_operations = selected_operations(query.ops.as_deref());
+    let selected_range = normalize_time_range(query.range.as_deref());
     let app_count = state.store.list_objects(ResourceKind::App).await?.len();
     let appset_count = state.store.list_objects(ResourceKind::AppSet).await?.len();
     let search_lower = search_query.to_ascii_lowercase();
@@ -164,6 +168,8 @@ async fn render_history_page(
                 &search_query,
                 object_page,
                 None,
+                Some(&selected_operations),
+                &selected_range,
                 None,
             ),
             is_selected: selected_key
@@ -179,14 +185,26 @@ async fn render_history_page(
         objects.len(),
         "objects_page",
         format!("/{}", kind.route()),
-        |page| collection_href(kind, &search_query, page),
+        |page| {
+            collection_href(
+                kind,
+                &search_query,
+                page,
+                &selected_operations,
+                &selected_range,
+            )
+        },
     );
 
     let mut has_selection = false;
     let mut selected_name = String::new();
     let mut selected_namespace = String::new();
     let mut selected_source_label = String::new();
-    let mut versions = Vec::new();
+    let mut overview_first_backup_at = "-".to_string();
+    let mut overview_latest_backup_at = "-".to_string();
+    let mut overview_total_versions = 0usize;
+    let mut overview_latest_operation = "-".to_string();
+    let mut timeline_groups = Vec::new();
     let mut versions_pagination = None;
     let mut preview_block = HighlightedBlock {
         title: "YAML 预览".to_string(),
@@ -194,7 +212,7 @@ async fn render_history_page(
     };
     let mut diff_block = None;
 
-    if let Some((namespace, name)) = selected {
+    if let Some((namespace, name)) = selected.clone() {
         let history = state.store.get_history(kind, &namespace, &name).await?;
         if history.versions.is_empty() {
             return Err(AppError::not_found("history"));
@@ -204,14 +222,94 @@ async fn render_history_page(
         selected_name = history.name.clone();
         selected_namespace = history.namespace.clone();
         selected_source_label = history.source_label.clone();
+        overview_first_backup_at = history.overview.first_backup_at.clone();
+        overview_latest_backup_at = history.overview.latest_backup_at.clone();
+        overview_total_versions = history.overview.total_versions;
+        overview_latest_operation = history.overview.latest_operation.clone();
 
-        let versions_page =
-            resolve_versions_page(&history, query.version.as_deref(), query.versions_page);
+        let filtered_versions = history
+            .versions
+            .into_iter()
+            .filter(|item| version_matches(item, &selected_operations, &selected_range))
+            .collect::<Vec<_>>();
+        if filtered_versions.is_empty() {
+            preview_block = HighlightedBlock {
+                title: "YAML 预览".to_string(),
+                lines: vec![plain_line("当前筛选条件下没有历史版本。")],
+            };
+            let template = HistoryTemplate {
+                active_route: kind.route(),
+                apps_href: collection_href(
+                    ResourceKind::App,
+                    &search_query,
+                    object_page,
+                    &selected_operations,
+                    &selected_range,
+                ),
+                appsets_href: collection_href(
+                    ResourceKind::AppSet,
+                    &search_query,
+                    object_page,
+                    &selected_operations,
+                    &selected_range,
+                ),
+                search_action: format!("/{}", kind.route()),
+                app_count,
+                appset_count,
+                object_groups,
+                object_pagination,
+                current_objects_page: object_page,
+                search_query: search_query.clone(),
+                operation_filters: build_operation_filters(
+                    kind,
+                    selected.as_ref(),
+                    &search_query,
+                    object_page,
+                    &selected_operations,
+                    &selected_range,
+                ),
+                time_filters: build_time_filters(
+                    kind,
+                    selected.as_ref(),
+                    &search_query,
+                    object_page,
+                    &selected_operations,
+                    &selected_range,
+                ),
+                retention_days: state.store.retention_days(),
+                has_selection,
+                selected_name,
+                selected_namespace,
+                selected_source_label,
+                overview_first_backup_at,
+                overview_latest_backup_at,
+                overview_total_versions,
+                overview_latest_operation,
+                timeline_groups,
+                versions_pagination,
+                preview_block,
+                diff_block,
+            };
+            let body = template
+                .render()
+                .map_err(|error| AppError::from(anyhow::anyhow!(error)))?;
+            return Ok(Html(body));
+        }
+
+        let versions_page = resolve_versions_page_from_versions(
+            &filtered_versions,
+            query.version.as_deref(),
+            query.versions_page,
+        );
         let active_file = query
             .version
-            .filter(|value| history.versions.iter().any(|item| item.file_name == *value))
+            .filter(|value| {
+                filtered_versions
+                    .iter()
+                    .any(|item| item.file_name == *value)
+            })
             .unwrap_or_else(|| {
-                paginate_slice(&history.versions, versions_page, PAGE_SIZE)[0]
+                paginate_slice(&filtered_versions, versions_page, PAGE_SIZE)[0]
                     .file_name
                     .clone()
             });
@@ -226,13 +324,12 @@ async fn render_history_page(
             lines: highlight_yaml_block(&preview_content),
         };
 
-        let active_index = history
-            .versions
+        let active_index = filtered_versions
             .iter()
             .position(|item| item.file_name == active_file)
             .unwrap_or(0);
-        if active_index + 1 < history.versions.len() {
-            let previous_file = history.versions[active_index + 1].file_name.clone();
+        if active_index + 1 < filtered_versions.len() {
+            let previous_file = filtered_versions[active_index + 1].file_name.clone();
             let previous_content = state
                 .store
                 .read_snapshot(kind, &namespace, &name, &previous_file)
@@ -244,12 +341,14 @@ async fn render_history_page(
             });
         }
 
-        let version_page_count = total_pages(history.versions.len(), PAGE_SIZE);
-        versions = paginate_slice(&history.versions, versions_page, PAGE_SIZE)
+        let version_page_count = total_pages(filtered_versions.len(), PAGE_SIZE);
+        let paged_versions = paginate_slice(&filtered_versions, versions_page, PAGE_SIZE)
             .iter()
             .map(|item| VersionLink {
-                title: format!("{} / {}", item.operation, item.file_name),
+                title: item.file_name.clone(),
                 timestamp: item.timestamp.clone(),
+                operation: item.operation.clone(),
+                summary: item.summary.clone(),
                 href: object_href(
                     kind,
                     &crate::model::namespace_key(&namespace),
@@ -257,6 +356,8 @@ async fn render_history_page(
                     &search_query,
                     object_page,
                     Some(versions_page),
+                    Some(&selected_operations),
+                    &selected_range,
                     Some(&item.file_name),
                 ),
                 download_href: format!(
@@ -268,11 +369,12 @@ async fn render_history_page(
                 ),
                 is_active: item.file_name == active_file,
             })
-            .collect();
+            .collect::<Vec<_>>();
+        timeline_groups = build_timeline_groups(paged_versions);
         versions_pagination = build_pagination(
             versions_page,
             version_page_count,
-            history.versions.len(),
+            filtered_versions.len(),
             "versions_page",
             format!(
                 "/{}/{}/{}",
@@ -288,6 +390,8 @@ async fn render_history_page(
                     &search_query,
                     object_page,
                     Some(page),
+                    Some(&selected_operations),
+                    &selected_range,
                     Some(&active_file),
                 )
             },
@@ -296,20 +400,53 @@ async fn render_history_page(
 
     let template = HistoryTemplate {
         active_route: kind.route(),
-        apps_href: collection_href(ResourceKind::App, &search_query, object_page),
-        appsets_href: collection_href(ResourceKind::AppSet, &search_query, object_page),
+        apps_href: collection_href(
+            ResourceKind::App,
+            &search_query,
+            object_page,
+            &selected_operations,
+            &selected_range,
+        ),
+        appsets_href: collection_href(
+            ResourceKind::AppSet,
+            &search_query,
+            object_page,
+            &selected_operations,
+            &selected_range,
+        ),
         search_action: format!("/{}", kind.route()),
         app_count,
         appset_count,
         object_groups,
         object_pagination,
         current_objects_page: object_page,
-        search_query,
+        search_query: search_query.clone(),
+        operation_filters: build_operation_filters(
+            kind,
+            selected.as_ref(),
+            &search_query,
+            object_page,
+            &selected_operations,
+            &selected_range,
+        ),
+        time_filters: build_time_filters(
+            kind,
+            selected.as_ref(),
+            &search_query,
+            object_page,
+            &selected_operations,
+            &selected_range,
+        ),
+        retention_days: state.store.retention_days(),
         has_selection,
         selected_name,
         selected_namespace,
         selected_source_label,
-        versions,
+        overview_first_backup_at,
+        overview_latest_backup_at,
+        overview_total_versions,
+        overview_latest_operation,
+        timeline_groups,
         versions_pagination,
         preview_block,
         diff_block,
@@ -726,10 +863,22 @@ fn classify_scalar(word: &str) -> &'static str {
     "tok-plain"
 }
 
-fn collection_href(kind: ResourceKind, search_query: &str, object_page: usize) -> String {
+fn collection_href(
+    kind: ResourceKind,
+    search_query: &str,
+    object_page: usize,
+    selected_operations: &[String],
+    selected_range: &str,
+) -> String {
     let mut query = Vec::new();
     if !search_query.is_empty() {
         query.push(format!("q={}", encode(search_query)));
+    }
+    if !selected_operations.is_empty() && selected_operations.len() < 3 {
+        query.push(format!("ops={}", encode(&selected_operations.join(","))));
+    }
+    if selected_range != "all" {
+        query.push(format!("range={}", encode(selected_range)));
     }
     if object_page > 1 {
         query.push(format!("objects_page={object_page}"));
@@ -748,11 +897,22 @@ fn object_href(
     search_query: &str,
     object_page: usize,
     versions_page: Option<usize>,
+    selected_operations: Option<&[String]>,
+    selected_range: &str,
     version: Option<&str>,
 ) -> String {
     let mut query = Vec::new();
     if !search_query.is_empty() {
         query.push(format!("q={}", encode(search_query)));
+    }
+    if let Some(selected_operations) = selected_operations
+        && !selected_operations.is_empty()
+        && selected_operations.len() < 3
+    {
+        query.push(format!("ops={}", encode(&selected_operations.join(","))));
+    }
+    if selected_range != "all" {
+        query.push(format!("range={}", encode(selected_range)));
     }
     if object_page > 1 {
         query.push(format!("objects_page={object_page}"));
@@ -775,6 +935,185 @@ fn object_href(
             query.join("&")
         )
     }
+}
+
+fn selected_operations(ops: Option<&str>) -> Vec<String> {
+    let mut values = ops
+        .unwrap_or("create,update,delete")
+        .split(',')
+        .map(|item| item.trim().to_ascii_lowercase())
+        .filter(|item| matches!(item.as_str(), "create" | "update" | "delete"))
+        .collect::<Vec<_>>();
+    values.sort();
+    values.dedup();
+    if values.is_empty() {
+        vec![
+            "create".to_string(),
+            "update".to_string(),
+            "delete".to_string(),
+        ]
+    } else {
+        values
+    }
+}
+
+fn normalize_time_range(value: Option<&str>) -> String {
+    match value.unwrap_or("all") {
+        "24h" | "7d" | "30d" => value.unwrap().to_string(),
+        _ => "all".to_string(),
+    }
+}
+
+fn version_matches(
+    version: &crate::model::SnapshotMeta,
+    selected_operations: &[String],
+    selected_range: &str,
+) -> bool {
+    if !selected_operations
+        .iter()
+        .any(|item| item.eq_ignore_ascii_case(&version.operation))
+    {
+        return false;
+    }
+
+    let timestamp = chrono::DateTime::parse_from_rfc3339(&version.timestamp_rfc3339)
+        .map(|value| value.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let now = chrono::Utc::now();
+    let within = match selected_range {
+        "24h" => now - timestamp <= chrono::Duration::hours(24),
+        "7d" => now - timestamp <= chrono::Duration::days(7),
+        "30d" => now - timestamp <= chrono::Duration::days(30),
+        _ => true,
+    };
+    within
+}
+
+fn build_operation_filters(
+    kind: ResourceKind,
+    selected: Option<&(String, String)>,
+    search_query: &str,
+    object_page: usize,
+    selected_operations: &[String],
+    selected_range: &str,
+) -> Vec<FilterChip> {
+    ["create", "update", "delete"]
+        .into_iter()
+        .map(|op| FilterChip {
+            label: op.to_ascii_uppercase(),
+            href: filter_href(
+                kind,
+                selected,
+                search_query,
+                object_page,
+                toggle_operation(selected_operations, op),
+                selected_range,
+            ),
+            active: selected_operations.iter().any(|item| item == op),
+        })
+        .collect()
+}
+
+fn build_time_filters(
+    kind: ResourceKind,
+    selected: Option<&(String, String)>,
+    search_query: &str,
+    object_page: usize,
+    selected_operations: &[String],
+    selected_range: &str,
+) -> Vec<FilterChip> {
+    [
+        ("all", "全部"),
+        ("24h", "24h"),
+        ("7d", "7d"),
+        ("30d", "30d"),
+    ]
+    .into_iter()
+    .map(|(key, label)| FilterChip {
+        label: label.to_string(),
+        href: filter_href(
+            kind,
+            selected,
+            search_query,
+            object_page,
+            selected_operations.to_vec(),
+            key,
+        ),
+        active: selected_range == key,
+    })
+    .collect()
+}
+
+fn toggle_operation(selected: &[String], op: &str) -> Vec<String> {
+    let mut next = selected.to_vec();
+    if next.iter().any(|item| item == op) {
+        next.retain(|item| item != op);
+    } else {
+        next.push(op.to_string());
+    }
+    next.sort();
+    next.dedup();
+    if next.is_empty() {
+        vec![
+            "create".to_string(),
+            "update".to_string(),
+            "delete".to_string(),
+        ]
+    } else {
+        next
+    }
+}
+
+fn filter_href(
+    kind: ResourceKind,
+    selected: Option<&(String, String)>,
+    search_query: &str,
+    object_page: usize,
+    selected_operations: Vec<String>,
+    selected_range: &str,
+) -> String {
+    if let Some((namespace, name)) = selected {
+        object_href(
+            kind,
+            &crate::model::namespace_key(namespace),
+            name,
+            search_query,
+            object_page,
+            None,
+            Some(&selected_operations),
+            selected_range,
+            None,
+        )
+    } else {
+        collection_href(
+            kind,
+            search_query,
+            object_page,
+            &selected_operations,
+            selected_range,
+        )
+    }
+}
+
+fn build_timeline_groups(versions: Vec<VersionLink>) -> Vec<TimelineGroup> {
+    let mut groups = Vec::<TimelineGroup>::new();
+    for version in versions {
+        let label = version
+            .timestamp
+            .split(' ')
+            .next()
+            .unwrap_or("-")
+            .to_string();
+        if let Some(group) = groups.iter_mut().find(|group| group.label == label) {
+            group.versions.push(version);
+        } else {
+            groups.push(TimelineGroup {
+                label,
+                versions: vec![version],
+            });
+        }
+    }
+    groups
 }
 
 fn total_pages(total: usize, page_size: usize) -> usize {
@@ -814,18 +1153,17 @@ fn resolve_object_page(
     1
 }
 
-fn resolve_versions_page(
-    history: &ObjectHistory,
+fn resolve_versions_page_from_versions(
+    versions: &[crate::model::SnapshotMeta],
     selected_version: Option<&str>,
     requested: Option<usize>,
 ) -> usize {
-    let total = total_pages(history.versions.len(), PAGE_SIZE);
+    let total = total_pages(versions.len(), PAGE_SIZE);
     if let Some(requested) = requested {
         return current_page(Some(requested), total);
     }
     if let Some(selected_version) = selected_version {
-        if let Some(index) = history
-            .versions
+        if let Some(index) = versions
             .iter()
             .position(|item| item.file_name == selected_version)
         {

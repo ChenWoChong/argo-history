@@ -93,17 +93,67 @@
               <div class="pill strong">{{ selected_source_label }}</div>
             </div>
           </div>
+          <div class="overview-grid">
+            <div class="overview-card">
+              <span class="overview-label">首次备份</span>
+              <strong>{{ overview_first_backup_at }}</strong>
+            </div>
+            <div class="overview-card">
+              <span class="overview-label">最近变更</span>
+              <strong>{{ overview_latest_backup_at }}</strong>
+            </div>
+            <div class="overview-card">
+              <span class="overview-label">总版本数</span>
+              <strong>{{ overview_total_versions }}</strong>
+            </div>
+            <div class="overview-card">
+              <span class="overview-label">最近操作</span>
+              <strong>{{ overview_latest_operation }}</strong>
+            </div>
+          </div>
+          <div class="retention-note">
+            当前保留策略 {{ retention_days }} 天，老版本会自动清理。
+          </div>
+          <div class="filters">
+            <div class="filter-group">
+              <span class="filter-label">操作筛选</span>
+              <div class="filter-chips">
+                {% for chip in operation_filters %}
+                <a class="filter-chip {% if chip.active %}active{% endif %}" href="{{ chip.href }}">{{ chip.label }}</a>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">时间范围</span>
+              <div class="filter-chips">
+                {% for chip in time_filters %}
+                <a class="filter-chip {% if chip.active %}active{% endif %}" href="{{ chip.href }}">{{ chip.label }}</a>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
           <div class="detail-grid">
             <div class="detail-main">
-              <div class="versions">
-              {% for version in versions %}
-              <div class="version-row {% if version.is_active %}active{% endif %}">
-                <a class="version-view" href="{{ version.href }}">
-                  <strong>{{ version.title }}</strong>
-                  <span>{{ version.timestamp }}</span>
-                </a>
-                <a class="download" href="{{ version.download_href }}">下载</a>
-              </div>
+              <div class="timeline">
+              {% for group in timeline_groups %}
+                <section class="timeline-group">
+                  <div class="timeline-date">{{ group.label }}</div>
+                  <div class="versions">
+                  {% for version in group.versions %}
+                  <div class="version-row {% if version.is_active %}active{% endif %}">
+                    <a class="version-view" href="{{ version.href }}">
+                      <div class="version-topline">
+                        <span class="version-op">{{ version.operation }}</span>
+                        <strong>{{ version.title }}</strong>
+                      </div>
+                      <span>{{ version.timestamp }}</span>
+                      <span class="version-summary">{{ version.summary }}</span>
+                    </a>
+                    <a class="download" href="{{ version.download_href }}">下载</a>
+                  </div>
+                  {% endfor %}
+                  </div>
+                </section>
               {% endfor %}
               </div>
               {% match versions_pagination %}

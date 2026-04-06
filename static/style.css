@@ -226,6 +226,79 @@ a {
   margin-top: 6px;
 }
 
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.overview-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: #f5f8f5;
+  border: 1px solid rgba(19, 35, 41, 0.08);
+}
+
+.overview-label {
+  display: block;
+  color: #637982;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.overview-card strong {
+  font-size: 18px;
+}
+
+.retention-note {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(24, 63, 57, 0.08);
+  color: #35535d;
+}
+
+.filters {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.filter-group {
+  display: grid;
+  gap: 8px;
+}
+
+.filter-label {
+  color: #637982;
+  font-size: 12px;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(19, 35, 41, 0.12);
+  background: rgba(255, 255, 255, 0.8);
+  color: #35535d;
+  font-size: 13px;
+}
+
+.filter-chip.active {
+  background: #183f39;
+  color: #fff8ef;
+  border-color: transparent;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: 360px 1fr;
@@ -237,6 +310,23 @@ a {
   display: grid;
   gap: 14px;
   align-self: start;
+}
+
+.timeline {
+  display: grid;
+  gap: 18px;
+}
+
+.timeline-group {
+  display: grid;
+  gap: 12px;
+}
+
+.timeline-date {
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #7d6647;
 }
 
 .stack {
@@ -337,6 +427,28 @@ a {
 .version-view {
   display: grid;
   gap: 6px;
+}
+
+.version-topline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.version-op {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(24, 63, 57, 0.1);
+  color: #1c4c46;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.version-summary {
+  color: #4c616b;
+  font-size: 14px;
 }
 
 .download {

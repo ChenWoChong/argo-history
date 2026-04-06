@@ -1,6 +1,13 @@
 use askama::Template;
 
 #[derive(Debug, Clone)]
+pub struct FilterChip {
+    pub label: String,
+    pub href: String,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct SidebarObject {
     pub name: String,
     pub namespace: String,
@@ -41,9 +48,17 @@ pub struct Pagination {
 pub struct VersionLink {
     pub title: String,
     pub timestamp: String,
+    pub operation: String,
+    pub summary: String,
     pub href: String,
     pub download_href: String,
     pub is_active: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct TimelineGroup {
+    pub label: String,
+    pub versions: Vec<VersionLink>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,11 +93,18 @@ pub struct HistoryTemplate {
     pub object_pagination: Option<Pagination>,
     pub current_objects_page: usize,
     pub search_query: String,
+    pub operation_filters: Vec<FilterChip>,
+    pub time_filters: Vec<FilterChip>,
+    pub retention_days: u64,
     pub has_selection: bool,
     pub selected_name: String,
     pub selected_namespace: String,
     pub selected_source_label: String,
-    pub versions: Vec<VersionLink>,
+    pub overview_first_backup_at: String,
+    pub overview_latest_backup_at: String,
+    pub overview_total_versions: usize,
+    pub overview_latest_operation: String,
+    pub timeline_groups: Vec<TimelineGroup>,
     pub versions_pagination: Option<Pagination>,
     pub preview_block: HighlightedBlock,
     pub diff_block: Option<HighlightedBlock>,
