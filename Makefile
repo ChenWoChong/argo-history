@@ -1,12 +1,12 @@
 APP_NAME ?= argo-history
 NAMESPACE ?= argo-history
-IMG ?= argo-history:dev
 HELM_RELEASE ?= argo-history
 CHART_DIR ?= chart
-ORB_VALUES ?= chart/values-orb-dev.yaml
+VALUES_FILE ?= chart/values.yaml
 NODEPORT ?= 32080
-LINUX_PLATFORM ?= linux/arm64
+LINUX_PLATFORM ?= linux/amd64
 RUST_IMAGE ?= rust:1.94-bookworm
+IMG ?= truth-ai-registry.cn-hangzhou.cr.aliyuncs.com/test/argo-history:dev
 
 SHELL := /usr/bin/env bash
 .SHELLFLAGS := -eo pipefail -c
@@ -51,6 +51,7 @@ build: ## Build a local release binary for the current OS.
 
 .PHONY: build-linux
 build-linux: ## Build a Linux release binary into target-linux/.
+	@echo "Building for platform: $(LINUX_PLATFORM)"
 	docker run --rm --platform $(LINUX_PLATFORM) \
 		-v "$(CURDIR):/workspace" \
 		-v "$(HOME)/.cargo/registry:/usr/local/cargo/registry" \
@@ -61,22 +62,28 @@ build-linux: ## Build a Linux release binary into target-linux/.
 
 .PHONY: docker-build
 docker-build: build-linux ## Build the runtime image tagged as $(IMG).
-	docker build -t $(IMG) .
+	@echo "Building Docker image $(IMG) for platform: $(LINUX_PLATFORM)"
+	docker build --platform $(LINUX_PLATFORM) -t $(IMG) .
+
+.PHONY: docker-push
+docker-push: docker-build ## Push the current image to remote registry. Usage: make docker-push IMG=your-registry/image:tag
+	@test -n "$(IMG)" || (echo "IMG is required, e.g. make docker-push IMG=your-registry/image:tag" && exit 1)
+	docker push $(IMG)
 
 .PHONY: docker-tag
-docker-tag: ## Retag the current image. Usage: make docker-tag TAG=new-tag
-	@test -n "$(TAG)" || (echo "TAG is required, e.g. make docker-tag TAG=argo-history:page-v6" && exit 1)
+docker-tag: ## Retag the current image. Usage: make docker-tag IMG=your-registry/image:tag
+	@test -n "$(IMG)" || (echo "IMG is required, e.g. make docker-tag IMG=your-registry/image:tag" && exit 1)
 	docker tag $(IMG) $(TAG)
 
 ##@ Chart
 
 .PHONY: chart-lint
 chart-lint: ## Run helm lint on the chart.
-	helm lint $(CHART_DIR) -f $(ORB_VALUES)
+	helm lint $(CHART_DIR) -f $(VALUES_FILE)
 
 .PHONY: helm-template
 helm-template: ## Render the chart locally.
-	helm template $(HELM_RELEASE) $(CHART_DIR) -f $(ORB_VALUES)
+	helm template $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(VALUES_FILE)
 
 .PHONY: helm-package
 helm-package: ## Package the chart into dist/.
@@ -87,12 +94,12 @@ helm-package: ## Package the chart into dist/.
 
 .PHONY: helm-install
 helm-install: ## Install or upgrade the chart in $(NAMESPACE).
-	helm upgrade -i $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(ORB_VALUES)
+	helm upgrade -i $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(VALUES_FILE)
 
 .PHONY: helm-install-img
 helm-install-img: ## Install or upgrade using IMG=<repo:tag>.
 	@img='$(IMG)'; \
-	helm upgrade -i $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(ORB_VALUES) \
+	helm upgrade -i $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(VALUES_FILE) \
 		--set image.repository="$${img%:*}" \
 		--set image.tag="$${img##*:}"
 
@@ -102,6 +109,14 @@ helm-uninstall: ## Uninstall the release from $(NAMESPACE).
 
 .PHONY: deploy-local
 deploy-local: docker-build helm-install-img ## Build image and deploy it to Orb k8s.
+
+.PHONY: deploy-remote
+deploy-remote: ## Deploy remote image. Usage: make deploy-remote IMG=your-registry/image:tag
+	@test -n "$(IMG)" || (echo "IMG is required, e.g. make deploy-remote IMG=your-registry/image:tag" && exit 1)
+	@img='$(IMG)'; \
+	helm upgrade -i $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(VALUES_FILE) \
+		--set image.repository="$${img%:*}" \
+		--set image.tag="$${img##*:}"
 
 .PHONY: restart
 restart: ## Restart the deployment.

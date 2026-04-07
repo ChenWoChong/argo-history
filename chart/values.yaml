@@ -1,7 +1,10 @@
 image:
-  repository: argo-history
+  repository: 192.168.10.101:5000/test/argo-history
   tag: dev
   pullPolicy: IfNotPresent
+
+initContainer:
+  image: 192.168.10.101:5000/third-party/busybox:1.35
 
 serviceAccount:
   create: true
@@ -17,11 +20,11 @@ history:
     enabled: true
     existingClaim: ""
     mountPath: /var/lib/argo-history
-    storageClassName: argo-history-hostpath
+    storageClassName:
     accessModes:
-      - ReadWriteOnce
+    - ReadWriteOnce
     size: 2Gi
-    createPv: true
+    createPv: false
     reclaimPolicy: Retain
     hostPath:
       path: /var/lib/argo-history
