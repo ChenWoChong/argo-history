@@ -28,3 +28,12 @@ make docker-build
 make helm-install
 make smoke-test
 ```
+
+## Helm 安装说明
+
+Chart 默认启用 `cert-manager` 来签发 admission webhook 证书。
+
+- 集群已安装 `cert-manager`：直接执行 `make helm-install`
+- 集群未安装 `cert-manager`：执行 `make helm-install HELM_ARGS='--set certManager.enabled=false'`
+
+关闭 `cert-manager` 后，chart 会自动生成并复用一个自签名 webhook TLS Secret，同时将 CA 直接写入 `ValidatingWebhookConfiguration`。

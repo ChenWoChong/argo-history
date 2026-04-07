@@ -70,3 +70,34 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-webhook-cert" (include "argo-history.fullname" .) -}}
 {{- end -}}
 {{- end -}}
+
+{{- define "argo-history.webhookTlsData" -}}
+{{- if hasKey .Values "__webhookTlsData" -}}
+{{- toYaml (get .Values "__webhookTlsData") -}}
+{{- else -}}
+{{- $secretName := include "argo-history.webhookSecretName" . -}}
+{{- $serviceName := include "argo-history.webhookServiceName" . -}}
+{{- $namespace := .Release.Namespace -}}
+{{- $dnsNames := list
+    $serviceName
+    (printf "%s.%s" $serviceName $namespace)
+    (printf "%s.%s.svc" $serviceName $namespace)
+    (printf "%s.%s.svc.cluster.local" $serviceName $namespace)
+-}}
+{{- $tlsData := dict -}}
+{{- $existingSecret := lookup "v1" "Secret" $namespace $secretName -}}
+{{- if $existingSecret -}}
+{{- $_ := set $tlsData "tls.crt" (index $existingSecret.data "tls.crt") -}}
+{{- $_ := set $tlsData "tls.key" (index $existingSecret.data "tls.key") -}}
+{{- $_ := set $tlsData "ca.crt" (default (index $existingSecret.data "tls.crt") (index $existingSecret.data "ca.crt")) -}}
+{{- else -}}
+{{- $ca := genCA (printf "%s-webhook-ca" (include "argo-history.fullname" .)) 3650 -}}
+{{- $cert := genSignedCert $serviceName nil $dnsNames 3650 $ca -}}
+{{- $_ := set $tlsData "tls.crt" ($cert.Cert | b64enc) -}}
+{{- $_ := set $tlsData "tls.key" ($cert.Key | b64enc) -}}
+{{- $_ := set $tlsData "ca.crt" ($ca.Cert | b64enc) -}}
+{{- end -}}
+{{- $_ := set .Values "__webhookTlsData" $tlsData -}}
+{{- toYaml $tlsData -}}
+{{- end -}}
+{{- end -}}

@@ -1,10 +1,10 @@
 image:
-  repository: 192.168.10.101:5000/test/argo-history
+  repository: truth-ai-registry.cn-hangzhou.cr.aliyuncs.com/test/argo-history
   tag: dev
   pullPolicy: IfNotPresent
 
 initContainer:
-  image: 192.168.10.101:5000/third-party/busybox:1.35
+  image: truth-ai-registry.cn-hangzhou.cr.aliyuncs.com/third-party/busybox:1.35
 
 serviceAccount:
   create: true

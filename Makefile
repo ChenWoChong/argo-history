@@ -3,6 +3,7 @@ NAMESPACE ?= argo-history
 HELM_RELEASE ?= argo-history
 CHART_DIR ?= chart
 VALUES_FILE ?= chart/values.yaml
+HELM_ARGS ?=
 NODEPORT ?= 32080
 LINUX_PLATFORM ?= linux/amd64
 RUST_IMAGE ?= rust:1.94-bookworm
@@ -79,11 +80,11 @@ docker-tag: ## Retag the current image. Usage: make docker-tag IMG=your-registry
 
 .PHONY: chart-lint
 chart-lint: ## Run helm lint on the chart.
-	helm lint $(CHART_DIR) -f $(VALUES_FILE)
+	helm lint $(CHART_DIR) -f $(VALUES_FILE) $(HELM_ARGS)
 
 .PHONY: helm-template
 helm-template: ## Render the chart locally.
-	helm template $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(VALUES_FILE)
+	helm template $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(VALUES_FILE) $(HELM_ARGS)
 
 .PHONY: helm-package
 helm-package: ## Package the chart into dist/.
@@ -94,12 +95,13 @@ helm-package: ## Package the chart into dist/.
 
 .PHONY: helm-install
 helm-install: ## Install or upgrade the chart in $(NAMESPACE).
-	helm upgrade -i $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(VALUES_FILE)
+	helm upgrade -i $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(VALUES_FILE) $(HELM_ARGS)
 
 .PHONY: helm-install-img
 helm-install-img: ## Install or upgrade using IMG=<repo:tag>.
 	@img='$(IMG)'; \
 	helm upgrade -i $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(VALUES_FILE) \
+		$(HELM_ARGS) \
 		--set image.repository="$${img%:*}" \
 		--set image.tag="$${img##*:}"
 
@@ -115,6 +117,7 @@ deploy-remote: ## Deploy remote image. Usage: make deploy-remote IMG=your-regist
 	@test -n "$(IMG)" || (echo "IMG is required, e.g. make deploy-remote IMG=your-registry/image:tag" && exit 1)
 	@img='$(IMG)'; \
 	helm upgrade -i $(HELM_RELEASE) $(CHART_DIR) -n $(NAMESPACE) --create-namespace -f $(VALUES_FILE) \
+		$(HELM_ARGS) \
 		--set image.repository="$${img%:*}" \
 		--set image.tag="$${img##*:}"
 
